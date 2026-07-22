@@ -14,7 +14,9 @@ import json
 import os
 import shutil
 import sqlite3
+import subprocess
 import sys
+import threading
 from collections import defaultdict
 from datetime import date, datetime
 from pathlib import Path
@@ -30,6 +32,10 @@ SOURCE_WORKBOOK = DATA_DIR / "407.xlsx"
 MONEY = "$"
 DEFAULT_PEOPLE = ["Abdul", "Uday", "Gurpreet"]
 DEFAULT_DRIVERS = {"Uday": 8.2, "Gurpreet": 7.9}
+PUBLISH_COMMAND = [sys.executable, str(DATA_DIR / "publish_readonly.py")]
+GIT_PUBLISH_COMMAND = ["git", "add", "docs/index.html", "docs/.nojekyll"]
+GIT_COMMIT_COMMAND = ["git", "commit", "-m", "Update read-only GitHub Pages snapshot"]
+GIT_PUSH_COMMAND = ["git", "push", "origin", "master"]
 
 
 def money(value: float) -> str:
@@ -483,6 +489,8 @@ class GasTrackerApp(tk.Tk):
     def __init__(self, db: Database):
         super().__init__()
         self.db = db
+        self._publishing = False
+        self._publish_pending = False
         self.title(APP_NAME)
         self.geometry("1180x760")
         self.minsize(900, 610)
@@ -669,6 +677,68 @@ class GasTrackerApp(tk.Tk):
         self.uday_efficiency.delete(0, "end"); self.uday_efficiency.insert(0, str(drivers.get("Uday", "")))
         self.gurpreet_efficiency.delete(0, "end"); self.gurpreet_efficiency.insert(0, str(drivers.get("Gurpreet", "")))
 
+    def _run_publish_task(self, task) -> None:
+        threading.Thread(target=task, daemon=True).start()
+
+    def _git_has_remote(self) -> bool:
+        result = subprocess.run(["git", "remote"], cwd=DATA_DIR, capture_output=True, text=True)
+        return result.returncode == 0 and bool(result.stdout.strip())
+
+    def _git_has_changes(self) -> bool:
+        result = subprocess.run(["git", "status", "--porcelain", "--", "docs/index.html", "docs/.nojekyll"], cwd=DATA_DIR, capture_output=True, text=True)
+        return result.returncode == 0 and bool(result.stdout.strip())
+
+    def _git_stage_changes(self) -> bool:
+        result = subprocess.run(GIT_PUBLISH_COMMAND, cwd=DATA_DIR, capture_output=True, text=True)
+        if result.returncode != 0:
+            self.after(0, lambda: messagebox.showerror("Publish failed", f"Git add failed:\n{result.stderr or result.stdout or 'Unknown error'}"))
+            return False
+        return True
+
+    def _git_commit_changes(self) -> bool:
+        result = subprocess.run(GIT_COMMIT_COMMAND, cwd=DATA_DIR, capture_output=True, text=True)
+        if result.returncode == 0:
+            return True
+        if "nothing to commit" in (result.stderr or result.stdout).lower():
+            return True
+        self.after(0, lambda: messagebox.showerror("Publish failed", f"Git commit failed:\n{result.stderr or result.stdout or 'Unknown error'}"))
+        return False
+
+    def _git_push_changes(self) -> bool:
+        result = subprocess.run(GIT_PUSH_COMMAND, cwd=DATA_DIR, capture_output=True, text=True)
+        if result.returncode == 0:
+            return True
+        self.after(0, lambda: messagebox.showerror("Publish failed", f"Git push failed:\n{result.stderr or result.stdout or 'Unknown error'}"))
+        return False
+
+    def _publish_readonly_snapshot(self) -> None:
+        if not (DATA_DIR / ".git").exists() or not self._git_has_remote():
+            return
+        self._publish_pending = True
+        if self._publishing:
+            return
+        self._publishing = True
+
+        def task() -> None:
+            while True:
+                self._publish_pending = False
+                try:
+                    subprocess.run(PUBLISH_COMMAND, cwd=DATA_DIR, check=True, capture_output=True, text=True)
+                except subprocess.CalledProcessError as exc:
+                    self.after(0, lambda: messagebox.showerror("Publish failed", f"Snapshot generation failed:\n{exc.stderr or exc.stdout or exc}"))
+                    break
+                if self._git_has_changes():
+                    if not self._git_stage_changes() or not self._git_commit_changes() or not self._git_push_changes():
+                        break
+                    self.after(0, lambda: messagebox.showinfo("Published", "Read-only snapshot updated and pushed to GitHub Pages."))
+                else:
+                    self.after(0, lambda: messagebox.showinfo("Published", "Snapshot regenerated. No content changes were detected."))
+                if not self._publish_pending:
+                    break
+            self._publishing = False
+
+        self._run_publish_task(task)
+
     def refresh_dashboard(self) -> None:
         for child in self.dashboard_cards.winfo_children(): child.destroy()
         for child in self.balance_card_frame.winfo_children(): child.destroy()
@@ -769,7 +839,7 @@ class GasTrackerApp(tk.Tk):
         except ValueError as exc:
             messagebox.showerror("Trip not saved", str(exc)); return
         self.trip_notes.delete(0, "end"); self.trip_price.delete(0, "end"); self.trip_preview.configure(text="")
-        self.refresh_all(); self.notebook.select(self.dashboard_tab)
+        self.refresh_all(); self._publish_readonly_snapshot(); self.notebook.select(self.dashboard_tab)
 
     def save_expense(self) -> None:
         try:
@@ -780,7 +850,7 @@ class GasTrackerApp(tk.Tk):
         except ValueError as exc:
             messagebox.showerror("Expense not saved", str(exc)); return
         self.expense_description.delete(0, "end"); self.expense_amount.delete(0, "end"); self.expense_notes.delete(0, "end")
-        self.refresh_all(); self.notebook.select(self.dashboard_tab)
+        self.refresh_all(); self._publish_readonly_snapshot(); self.notebook.select(self.dashboard_tab)
 
     def save_payment(self) -> None:
         try:
@@ -790,7 +860,7 @@ class GasTrackerApp(tk.Tk):
         except ValueError as exc:
             messagebox.showerror("Payment not saved", str(exc)); return
         self.payment_amount.delete(0, "end"); self.payment_notes.delete(0, "end")
-        self.refresh_all(); self.notebook.select(self.dashboard_tab)
+        self.refresh_all(); self._publish_readonly_snapshot(); self.notebook.select(self.dashboard_tab)
 
     def edit_selected(self) -> None:
         selected = self.activity_tree.selection()
@@ -857,7 +927,7 @@ class GasTrackerApp(tk.Tk):
                 self.db.update_trip(event["id"], parse_date(date_entry.get()), driver.get(), float(kms_entry.get()), price, float(efficiency_entry.get()), attendees, note_entry.get())
             except ValueError as exc:
                 messagebox.showerror("Changes not saved", str(exc), parent=window); return
-            window.destroy(); self.refresh_all()
+            window.destroy(); self.refresh_all(); self._publish_readonly_snapshot()
 
         self._editor_actions(form, 7, save, window)
 
@@ -884,7 +954,7 @@ class GasTrackerApp(tk.Tk):
                 self.db.update_expense(event["id"], parse_date(date_entry.get()), category.get() or "Other", description.get(), float(amount.get()), payer.get(), attendees, note_entry.get())
             except ValueError as exc:
                 messagebox.showerror("Changes not saved", str(exc), parent=window); return
-            window.destroy(); self.refresh_all()
+            window.destroy(); self.refresh_all(); self._publish_readonly_snapshot()
 
         self._editor_actions(form, 7, save, window)
 
@@ -905,7 +975,7 @@ class GasTrackerApp(tk.Tk):
                 self.db.update_payment(event["id"], parse_date(date_entry.get()), payer.get(), payee.get(), float(amount.get()), note_entry.get())
             except ValueError as exc:
                 messagebox.showerror("Changes not saved", str(exc), parent=window); return
-            window.destroy(); self.refresh_all()
+            window.destroy(); self.refresh_all(); self._publish_readonly_snapshot()
 
         self._editor_actions(form, 5, save, window)
 
@@ -916,7 +986,7 @@ class GasTrackerApp(tk.Tk):
         if not messagebox.askyesno("Delete entry", f"Delete this {event['kind'].lower()}? This cannot be undone except by restoring a backup."): return
         self.db.delete_event(event["kind"], event["id"])
         self.activity_detail.configure(text="Select an entry to see its calculation or note.")
-        self.refresh_all()
+        self.refresh_all(); self._publish_readonly_snapshot()
 
     def save_settings(self) -> None:
         try:

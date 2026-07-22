@@ -1,0 +1,7 @@
+# Keep local and personal data out of the repository. Publish only docs/index.html.
+gas_tracker.db
+407.xlsx
+backups/
+__pycache__/
+*.pyc
+gas_tracker_ledger_*.csv

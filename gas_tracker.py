@@ -526,6 +526,11 @@ class GasTrackerApp(tk.Tk):
         header.pack(fill="x")
         tk.Label(header, text="GAS / SPLIT", font=("Segoe UI", 21, "bold"), fg="white", bg="#102b43").pack(anchor="w")
         tk.Label(header, text="Track every ride, shared cost, and payment in one clear place.", font=("Segoe UI", 10), fg="#b7cadb", bg="#102b43").pack(anchor="w", pady=(3, 0))
+        controls = tk.Frame(header, bg="#102b43")
+        controls.pack(side="right", anchor="n")
+        self.publish_status = tk.Label(controls, text="Publish idle", font=("Segoe UI", 9), fg="#bdd0df", bg="#102b43")
+        self.publish_status.pack(side="right", padx=(0, 8))
+        ttk.Button(controls, text="Publish now", style="Accent.TButton", command=self._publish_readonly_snapshot).pack(side="right")
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill="both", expand=True, padx=24, pady=(16, 22))
         self.dashboard_tab = ttk.Frame(self.notebook, padding=18)
@@ -680,62 +685,90 @@ class GasTrackerApp(tk.Tk):
     def _run_publish_task(self, task) -> None:
         threading.Thread(target=task, daemon=True).start()
 
+    def _subprocess_run(self, args, check: bool = False, **kwargs) -> subprocess.CompletedProcess:
+        kwargs.setdefault("cwd", DATA_DIR)
+        kwargs.setdefault("capture_output", True)
+        kwargs.setdefault("text", True)
+        kwargs.setdefault("stdin", subprocess.DEVNULL)
+        if os.name == "nt":
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = subprocess.SW_HIDE
+            kwargs["startupinfo"] = startupinfo
+            kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+        result = subprocess.run(args, **kwargs)
+        if check and result.returncode != 0:
+            raise subprocess.CalledProcessError(result.returncode, result.args, output=result.stdout, stderr=result.stderr)
+        return result
+
     def _git_has_remote(self) -> bool:
-        result = subprocess.run(["git", "remote"], cwd=DATA_DIR, capture_output=True, text=True)
+        result = self._subprocess_run(["git", "remote"])
         return result.returncode == 0 and bool(result.stdout.strip())
 
     def _git_has_changes(self) -> bool:
-        result = subprocess.run(["git", "status", "--porcelain", "--", "docs/index.html", "docs/.nojekyll"], cwd=DATA_DIR, capture_output=True, text=True)
+        result = self._subprocess_run(["git", "status", "--porcelain", "--", "docs/index.html", "docs/.nojekyll"])
         return result.returncode == 0 and bool(result.stdout.strip())
 
     def _git_stage_changes(self) -> bool:
-        result = subprocess.run(GIT_PUBLISH_COMMAND, cwd=DATA_DIR, capture_output=True, text=True)
+        result = self._subprocess_run(GIT_PUBLISH_COMMAND)
         if result.returncode != 0:
-            self.after(0, lambda: messagebox.showerror("Publish failed", f"Git add failed:\n{result.stderr or result.stdout or 'Unknown error'}"))
+            message = (result.stderr or result.stdout or "Unknown error").strip().splitlines()[0]
+            self._set_publish_status(f"Git add failed: {message}", "#f97575")
             return False
         return True
 
     def _git_commit_changes(self) -> bool:
-        result = subprocess.run(GIT_COMMIT_COMMAND, cwd=DATA_DIR, capture_output=True, text=True)
+        result = self._subprocess_run(GIT_COMMIT_COMMAND)
         if result.returncode == 0:
             return True
-        if "nothing to commit" in (result.stderr or result.stdout).lower():
+        output = (result.stderr or result.stdout or "").lower()
+        if "nothing to commit" in output:
             return True
-        self.after(0, lambda: messagebox.showerror("Publish failed", f"Git commit failed:\n{result.stderr or result.stdout or 'Unknown error'}"))
+        message = (result.stderr or result.stdout or "Unknown error").strip().splitlines()[0]
+        self._set_publish_status(f"Git commit failed: {message}", "#f97575")
         return False
 
     def _git_push_changes(self) -> bool:
-        result = subprocess.run(GIT_PUSH_COMMAND, cwd=DATA_DIR, capture_output=True, text=True)
+        result = self._subprocess_run(GIT_PUSH_COMMAND)
         if result.returncode == 0:
             return True
-        self.after(0, lambda: messagebox.showerror("Publish failed", f"Git push failed:\n{result.stderr or result.stdout or 'Unknown error'}"))
+        message = (result.stderr or result.stdout or "Unknown error").strip().splitlines()[0]
+        self._set_publish_status(f"Git push failed: {message}", "#f97575")
         return False
+
+    def _set_publish_status(self, text: str, color: str = "#bdd0df") -> None:
+        self.after(0, lambda: self.publish_status.configure(text=text, fg=color))
 
     def _publish_readonly_snapshot(self) -> None:
         if not (DATA_DIR / ".git").exists() or not self._git_has_remote():
             return
         self._publish_pending = True
         if self._publishing:
+            self._set_publish_status("Publish queued…", "#f3b000")
             return
         self._publishing = True
+        self._set_publish_status("Publishing snapshot…", "#bdd0df")
 
         def task() -> None:
-            while True:
-                self._publish_pending = False
-                try:
-                    subprocess.run(PUBLISH_COMMAND, cwd=DATA_DIR, check=True, capture_output=True, text=True)
-                except subprocess.CalledProcessError as exc:
-                    self.after(0, lambda: messagebox.showerror("Publish failed", f"Snapshot generation failed:\n{exc.stderr or exc.stdout or exc}"))
-                    break
-                if self._git_has_changes():
-                    if not self._git_stage_changes() or not self._git_commit_changes() or not self._git_push_changes():
+            try:
+                while True:
+                    self._publish_pending = False
+                    try:
+                        self._subprocess_run(PUBLISH_COMMAND, check=True)
+                    except subprocess.CalledProcessError:
+                        self._set_publish_status("Publish failed", "#f97575")
                         break
-                    self.after(0, lambda: messagebox.showinfo("Published", "Read-only snapshot updated and pushed to GitHub Pages."))
-                else:
-                    self.after(0, lambda: messagebox.showinfo("Published", "Snapshot regenerated. No content changes were detected."))
-                if not self._publish_pending:
-                    break
-            self._publishing = False
+                    if self._git_has_changes():
+                        if not self._git_stage_changes() or not self._git_commit_changes() or not self._git_push_changes():
+                            self._set_publish_status("Publish failed", "#f97575")
+                            break
+                        self._set_publish_status(f"Published at {datetime.now().strftime('%H:%M:%S')}", "#a8f0c6")
+                    else:
+                        self._set_publish_status("Snapshot up to date", "#a8f0c6")
+                    if not self._publish_pending:
+                        break
+            finally:
+                self._publishing = False
 
         self._run_publish_task(task)
 

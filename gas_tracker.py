@@ -43,7 +43,7 @@ THEME = {
     "bg": "#07111d",
     "surface": "#0e1a2b",
     "surface_2": "#132235",
-    "line": "#22344c",
+    "line": "#33577d",
     "text": "#e6eef8",
     "muted": "#92a5bb",
     "accent": "#3e9cff",
@@ -555,29 +555,31 @@ class GasTrackerApp(tk.Tk):
         style = ttk.Style(self)
         style.theme_use("clam")
         style.configure("TFrame", background=THEME["bg"])
-        style.configure("TLabel", background=THEME["bg"], foreground=THEME["text"], font=("Segoe UI", 10))
-        style.configure("Panel.TLabel", background=THEME["surface"], foreground=THEME["text"], font=("Segoe UI", 10))
-        style.configure("SubPanel.TLabel", background=THEME["surface"], foreground=THEME["muted"], font=("Segoe UI", 10))
+        style.configure("TLabel", background=THEME["bg"], foreground="white", font=("Segoe UI", 10))
+        style.configure("Panel.TLabel", background=THEME["surface"], foreground="white", font=("Segoe UI", 10))
+        style.configure("SubPanel.TLabel", background=THEME["surface"], foreground="white", font=("Segoe UI", 10))
         style.configure("TNotebook", background=THEME["bg"], borderwidth=0)
         style.configure("TNotebook.Tab", padding=(18, 10), background=THEME["surface_2"], foreground=THEME["muted"], font=("Segoe UI", 10, "bold"))
-        style.map("TNotebook.Tab", background=[("selected", THEME["surface"])], foreground=[("selected", THEME["text"])])
-        style.configure("Title.TLabel", font=("Segoe UI", 20, "bold"), foreground=THEME["text"], background=THEME["bg"])
-        style.configure("Sub.TLabel", font=("Segoe UI", 10), foreground=THEME["muted"], background=THEME["bg"])
+        style.map("TNotebook.Tab", background=[("selected", THEME["surface"])], foreground=[("selected", "white")])
+        style.configure("Title.TLabel", font=("Segoe UI", 20, "bold"), foreground="white", background=THEME["bg"])
+        style.configure("Sub.TLabel", font=("Segoe UI", 10), foreground="white", background=THEME["bg"])
         style.configure("Card.TFrame", background=THEME["surface"], relief="solid", borderwidth=1, bordercolor=THEME["line"])
-        style.configure("CardTitle.TLabel", font=("Segoe UI", 10, "bold"), foreground=THEME["muted"], background=THEME["surface"])
-        style.configure("CardValue.TLabel", font=("Segoe UI", 18, "bold"), foreground=THEME["text"], background=THEME["surface"])
+        style.configure("CardTitle.TLabel", font=("Segoe UI", 10, "bold"), foreground="white", background=THEME["surface"])
+        style.configure("CardValue.TLabel", font=("Segoe UI", 18, "bold"), foreground="white", background=THEME["surface"])
         style.configure("Primary.TButton", font=("Segoe UI", 10, "bold"), padding=(15, 9), background=THEME["accent_2"], foreground="white", borderwidth=0)
         style.map("Primary.TButton", background=[("active", "#1fd0bb")])
         style.configure("Accent.TButton", font=("Segoe UI", 10, "bold"), padding=(12, 7), background=THEME["accent"], foreground="white", borderwidth=0)
         style.map("Accent.TButton", background=[("active", "#61adff")])
         style.configure("TLabelFrame", background=THEME["surface"], bordercolor=THEME["line"], relief="solid")
-        style.configure("TLabelFrame.Label", background=THEME["surface"], foreground=THEME["text"], font=("Segoe UI", 10, "bold"))
-        style.configure("Treeview", font=("Segoe UI", 10), rowheight=34, background=THEME["surface"], fieldbackground=THEME["surface"], foreground=THEME["text"], bordercolor=THEME["line"])
-        style.configure("Treeview.Heading", font=("Segoe UI", 10, "bold"), background=THEME["surface_2"], foreground=THEME["text"], relief="flat")
+        style.configure("TLabelFrame.Label", background=THEME["surface"], foreground="white", font=("Segoe UI", 10, "bold"))
+        style.configure("Treeview", font=("Segoe UI", 10), rowheight=34, background=THEME["surface"], fieldbackground=THEME["surface"], foreground="white", bordercolor=THEME["line"])
+        style.configure("Treeview.Heading", font=("Segoe UI", 10, "bold"), background=THEME["surface_2"], foreground="white", relief="flat")
         style.map("Treeview", background=[("selected", "#284c75")], foreground=[("selected", "white")])
-        style.configure("TEntry", fieldbackground="#0c1725", foreground=THEME["text"], insertcolor=THEME["text"])
-        style.configure("TCombobox", fieldbackground="#0c1725", foreground=THEME["text"], arrowsize=12)
-        style.map("TCombobox", fieldbackground=[("readonly", "#0c1725")], foreground=[("readonly", THEME["text"])])
+        style.configure("TEntry", fieldbackground="#0c1725", foreground="white", insertcolor="white")
+        style.configure("TCombobox", fieldbackground="#0c1725", foreground="white", arrowsize=12)
+        style.map("TCombobox", fieldbackground=[("readonly", "#0c1725")], foreground=[("readonly", "white")])
+        style.configure("TCheckbutton", background=THEME["bg"], foreground="white")
+        style.map("TCheckbutton", foreground=[("active", "white"), ("selected", "white")], background=[("active", THEME["bg"])])
 
     def _build_ui(self) -> None:
         header = tk.Frame(self, bg=THEME["surface_2"], padx=28, pady=20)
@@ -658,7 +660,7 @@ class GasTrackerApp(tk.Tk):
         self._form_label(form, "Who went?", 5)
         self.trip_people_box = PeopleChecks(form, self.db.people, ["Uday", "Gurpreet"])
         self.trip_people_box.grid(row=5, column=1, sticky="w", pady=(7, 2))
-        self.trip_preview = ttk.Label(form, text="", foreground=THEME["success"], font=("Segoe UI", 11, "bold"))
+        self.trip_preview = ttk.Label(form, text="", foreground="white", font=("Segoe UI", 11, "bold"))
         self.trip_preview.grid(row=6, column=1, sticky="w", pady=(15, 7))
         ttk.Button(form, text="Preview cost", style="Accent.TButton", command=self.preview_trip).grid(row=7, column=1, sticky="w", pady=(3, 5))
         ttk.Button(form, text="Save trip", style="Primary.TButton", command=self.save_trip).grid(row=8, column=1, sticky="w", pady=(8, 0))
@@ -708,7 +710,7 @@ class GasTrackerApp(tk.Tk):
         self.activity_tree.pack(fill="both", expand=True)
         self.activity_tree.bind("<<TreeviewSelect>>", self.show_selected_detail)
         self.activity_tree.bind("<Double-1>", lambda _event: self.edit_selected())
-        self.activity_detail = ttk.Label(self.activity_tab, text="Select an entry to see its calculation or note.", wraplength=1000, foreground=THEME["muted"])
+        self.activity_detail = ttk.Label(self.activity_tab, text="Select an entry to see its calculation or note.", wraplength=1000, foreground="white")
         self.activity_detail.pack(fill="x", pady=(10, 0))
 
     def _build_settings(self) -> None:
@@ -721,11 +723,14 @@ class GasTrackerApp(tk.Tk):
         self._form_label(form, "Uday fuel use (L/100 km)", 1); self.uday_efficiency.grid(row=1, column=1, sticky="w", pady=(7, 2))
         self._form_label(form, "Gurpreet fuel use (L/100 km)", 2); self.gurpreet_efficiency.grid(row=2, column=1, sticky="w", pady=(7, 2))
         ttk.Button(form, text="Save settings", style="Primary.TButton", command=self.save_settings).grid(row=3, column=1, sticky="w", pady=(14, 20))
-        backups = ttk.LabelFrame(self.settings_tab, text="Backup and export", padding=13)
+        backups = tk.Frame(self.settings_tab, bg=THEME["surface"], highlightbackground=THEME["line"], highlightthickness=1, padx=14, pady=13)
         backups.grid(row=3, column=0, sticky="nw", pady=(20, 0))
-        ttk.Button(backups, text="Create database backup", command=self.backup_database).pack(side="left", padx=(0, 9))
-        ttk.Button(backups, text="Export ledger to CSV", command=self.export_csv).pack(side="left")
-        ttk.Label(self.settings_tab, text="Tip: keep 407.xlsx as a read-only historical source. This app does not modify it.", foreground=THEME["muted"]).grid(row=4, column=0, sticky="w", pady=(15, 0))
+        ttk.Label(backups, text="Backup and export", style="CardTitle.TLabel").pack(anchor="w")
+        buttons = ttk.Frame(backups)
+        buttons.pack(anchor="w", pady=(10, 0))
+        ttk.Button(buttons, text="Create database backup", command=self.backup_database).pack(side="left", padx=(0, 9))
+        ttk.Button(buttons, text="Export ledger to CSV", command=self.export_csv).pack(side="left")
+        ttk.Label(self.settings_tab, text="Tip: keep 407.xlsx as a read-only historical source. This app does not modify it.", foreground="white").grid(row=4, column=0, sticky="w", pady=(15, 0))
 
     def update_choices(self) -> None:
         drivers = list(self.db.drivers)

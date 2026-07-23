@@ -10,6 +10,7 @@ from __future__ import annotations
 import calendar
 import csv
 from decimal import Decimal, ROUND_HALF_UP
+from copy import copy
 import json
 import os
 import shutil
@@ -22,6 +23,8 @@ from datetime import date, datetime
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
+
+from openpyxl import Workbook
 
 
 APP_NAME = "Gas & Cost Splitter"
@@ -303,6 +306,14 @@ class Database:
         )
         self.conn.commit()
 
+    def update_pending_trip_prices(self, price_cents: float) -> int:
+        pending = self.conn.execute("SELECT COUNT(*) FROM trips WHERE price_cents IS NULL").fetchone()[0]
+        if not pending:
+            return 0
+        self.conn.execute("UPDATE trips SET price_cents = ? WHERE price_cents IS NULL", (price_cents,))
+        self.conn.commit()
+        return int(pending)
+
     def add_expense(self, event_date: str, category: str, description: str, amount: float, payer: str, attendees: list[str], notes: str = "") -> None:
         self.conn.execute(
             "INSERT INTO expenses(event_date, category, description, amount, payer, attendees, notes) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -471,6 +482,34 @@ class Database:
             writer.writerow(["Balance check", "", "", "", round(sum(balances.values()), 2)])
         return len(lines)
 
+    def export_xlsx(self, destination: Path) -> int:
+        balances, lines = self.ledger()
+        workbook = Workbook()
+        ledger_sheet = workbook.active
+        ledger_sheet.title = "Ledger"
+        headers = ["Date", "Type", "Description", "Person", "Ledger amount", "Reason", "Paid by", "Total event cost", "Notes"]
+        ledger_sheet.append(headers)
+        for cell in ledger_sheet[1]:
+            font = copy(cell.font)
+            font.bold = True
+            cell.font = font
+        for line in sorted(lines, key=lambda row: (row["date"], row["id"]), reverse=True):
+            ledger_sheet.append([line["date"], line["kind"], line["description"], line["person"], round(line["amount"], 2), line["reason"], line["payer"], round(line["total"], 2), line["notes"]])
+
+        balance_sheet = workbook.create_sheet("Balances")
+        balance_sheet.append(["Person", "Balance"])
+        for cell in balance_sheet[1]:
+            font = copy(cell.font)
+            font.bold = True
+            cell.font = font
+        for person, balance in balances.items():
+            balance_sheet.append([person, round(balance, 2)])
+        balance_sheet.append([])
+        balance_sheet.append(["Balance check", round(sum(balances.values()), 2)])
+
+        workbook.save(destination)
+        return len(lines)
+
 
 class PeopleChecks(ttk.Frame):
     def __init__(self, parent: tk.Misc, people: list[str], selected: list[str] | None = None):
@@ -635,9 +674,10 @@ class GasTrackerApp(tk.Tk):
     def _build_activity(self) -> None:
         top = ttk.Frame(self.activity_tab); top.pack(fill="x", pady=(0, 10))
         ttk.Label(top, text="Activity", style="Title.TLabel").pack(side="left")
-        ttk.Label(top, text="Select an entry to inspect, edit, or remove it.", style="Sub.TLabel").pack(side="left", padx=14)
+        ttk.Label(top, text="Select an entry to inspect, edit, remove it, or fill in pending gas prices in one pass.", style="Sub.TLabel").pack(side="left", padx=14)
         ttk.Button(top, text="Delete selected", command=self.delete_selected).pack(side="right")
         ttk.Button(top, text="Edit selected", style="Accent.TButton", command=self.edit_selected).pack(side="right", padx=(0, 8))
+        ttk.Button(top, text="Fill pending gas prices", style="Primary.TButton", command=self.fill_pending_gas_prices).pack(side="right", padx=(0, 8))
         columns = ("date", "type", "description", "payer", "people", "total", "share")
         self.activity_tree = ttk.Treeview(self.activity_tab, columns=columns, show="headings", selectmode="browse")
         headings = {"date": "Date", "type": "What happened", "description": "Details", "payer": "Paid by / from", "people": "Shared with", "total": "Total", "share": "Each person's share"}
@@ -754,6 +794,7 @@ class GasTrackerApp(tk.Tk):
                 while True:
                     self._publish_pending = False
                     try:
+                        self._create_backup_bundle()
                         self._subprocess_run(PUBLISH_COMMAND, check=True)
                     except subprocess.CalledProcessError:
                         self._set_publish_status("Publish failed", "#f97575")
@@ -771,6 +812,20 @@ class GasTrackerApp(tk.Tk):
                 self._publishing = False
 
         self._run_publish_task(task)
+
+    def _create_backup_bundle(self) -> Path:
+        target_dir = DATA_DIR / "backups"
+        target_dir.mkdir(exist_ok=True)
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+        base = target_dir / f"gas_tracker_{timestamp}"
+        db_target = base.with_suffix(".db")
+        csv_target = base.with_name(base.name + "_ledger.csv")
+        xlsx_target = base.with_name(base.name + "_ledger.xlsx")
+        self.db.conn.commit()
+        shutil.copy2(DB_PATH, db_target)
+        self.db.export_csv(csv_target)
+        self.db.export_xlsx(xlsx_target)
+        return base
 
     def refresh_dashboard(self) -> None:
         for child in self.dashboard_cards.winfo_children(): child.destroy()
@@ -873,6 +928,61 @@ class GasTrackerApp(tk.Tk):
             messagebox.showerror("Trip not saved", str(exc)); return
         self.trip_notes.delete(0, "end"); self.trip_price.delete(0, "end"); self.trip_preview.configure(text="")
         self.refresh_all(); self._publish_readonly_snapshot(); self.notebook.select(self.dashboard_tab)
+
+    def fill_pending_gas_prices(self) -> None:
+        pending_count = self.db.conn.execute("SELECT COUNT(*) FROM trips WHERE price_cents IS NULL").fetchone()[0]
+        if not pending_count:
+            messagebox.showinfo("No pending prices", "There are no fuel trips waiting for a gas price right now.")
+            return
+
+        window = tk.Toplevel(self)
+        window.title("Fill pending gas prices")
+        window.geometry("560x280")
+        window.minsize(520, 250)
+        window.configure(bg="#eef3f8")
+        window.transient(self)
+        window.grab_set()
+
+        header = tk.Frame(window, bg="#102b43", padx=22, pady=15)
+        header.pack(fill="x")
+        tk.Label(header, text="Fill pending gas prices", font=("Segoe UI", 16, "bold"), fg="white", bg="#102b43").pack(anchor="w")
+        tk.Label(header, text=f"Apply one gas price to all {pending_count} pending fuel trip{'s' if pending_count != 1 else ''}.", font=("Segoe UI", 9), fg="#b7cadb", bg="#102b43").pack(anchor="w", pady=(2, 0))
+
+        body = ttk.Frame(window, padding=22)
+        body.pack(fill="both", expand=True)
+        ttk.Label(body, text="Gas price (cents per L)", font=("Segoe UI", 10, "bold")).grid(row=0, column=0, sticky="w", pady=(0, 6))
+        price_entry = self._entry(body, 18)
+        price_entry.grid(row=1, column=0, sticky="w")
+        ttk.Label(body, text="This updates every saved trip that still has an empty gas price. It does not touch trips that already have a price.", wraplength=500, foreground="#61708a").grid(row=2, column=0, sticky="w", pady=(12, 0))
+
+        actions = ttk.Frame(body)
+        actions.grid(row=3, column=0, sticky="w", pady=(22, 0))
+
+        def apply_price() -> None:
+            try:
+                price_text = price_entry.get().strip()
+                if not price_text:
+                    raise ValueError("Enter a gas price in cents per litre.")
+                price = float(price_text)
+                if price < 0:
+                    raise ValueError("Gas price cannot be negative.")
+                updated = self.db.update_pending_trip_prices(price)
+            except ValueError as exc:
+                messagebox.showerror("Price not applied", str(exc), parent=window)
+                return
+            if updated:
+                window.destroy()
+                self.refresh_all()
+                self._publish_readonly_snapshot()
+                self.notebook.select(self.activity_tab)
+                messagebox.showinfo("Pending prices updated", f"Updated {updated} pending fuel trip{'s' if updated != 1 else ''}.")
+            else:
+                window.destroy()
+                messagebox.showinfo("No pending prices", "There were no pending fuel trips left to update.")
+
+        ttk.Button(actions, text="Apply to all pending trips", style="Primary.TButton", command=apply_price).pack(side="left")
+        ttk.Button(actions, text="Cancel", command=window.destroy).pack(side="left", padx=(9, 0))
+        price_entry.focus_set()
 
     def save_expense(self) -> None:
         try:
@@ -1040,11 +1150,11 @@ class GasTrackerApp(tk.Tk):
         self.refresh_all()
 
     def backup_database(self) -> None:
-        target_dir = DATA_DIR / "backups"; target_dir.mkdir(exist_ok=True)
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-        target = target_dir / f"gas_tracker_{timestamp}.db"
-        self.db.conn.commit(); shutil.copy2(DB_PATH, target)
-        messagebox.showinfo("Backup created", f"Saved:\n{target}")
+        base = self._create_backup_bundle()
+        messagebox.showinfo(
+            "Backup created",
+            f"Saved:\n{base.with_suffix('.db')}\n{base.with_name(base.name + '_ledger.csv')}\n{base.with_name(base.name + '_ledger.xlsx')}",
+        )
 
     def export_csv(self) -> None:
         name = f"gas_tracker_ledger_{date.today().isoformat()}.csv"

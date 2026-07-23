@@ -39,6 +39,19 @@ PUBLISH_COMMAND = [sys.executable, str(DATA_DIR / "publish_readonly.py")]
 GIT_PUBLISH_COMMAND = ["git", "add", "docs/index.html", "docs/.nojekyll"]
 GIT_COMMIT_COMMAND = ["git", "commit", "-m", "Update read-only GitHub Pages snapshot"]
 GIT_PUSH_COMMAND = ["git", "push", "origin", "master"]
+THEME = {
+    "bg": "#07111d",
+    "surface": "#0e1a2b",
+    "surface_2": "#132235",
+    "line": "#22344c",
+    "text": "#e6eef8",
+    "muted": "#92a5bb",
+    "accent": "#3e9cff",
+    "accent_2": "#17b8a6",
+    "success": "#21c38a",
+    "warning": "#efb84b",
+    "danger": "#f27f63",
+}
 
 
 def money(value: float) -> str:
@@ -90,7 +103,7 @@ class CalendarPopup(tk.Toplevel):
         self.year, self.month = selected.year, selected.month
         self.title("Choose a date")
         self.resizable(False, False)
-        self.configure(bg="#f7fafc")
+        self.configure(bg=THEME["surface"])
         self.transient(input_widget.winfo_toplevel())
         self._build()
         self.update_idletasks()
@@ -98,13 +111,13 @@ class CalendarPopup(tk.Toplevel):
         self.focus_set()
 
     def _build(self) -> None:
-        self.header = tk.Frame(self, bg="#12304a", padx=8, pady=7)
+        self.header = tk.Frame(self, bg=THEME["surface_2"], padx=8, pady=7)
         self.header.pack(fill="x")
-        tk.Button(self.header, text="<", command=lambda: self._move(-1), relief="flat", bg="#12304a", fg="white", activebackground="#1d4c73", activeforeground="white", width=3).pack(side="left")
-        self.month_label = tk.Label(self.header, font=("Segoe UI", 10, "bold"), bg="#12304a", fg="white")
+        tk.Button(self.header, text="<", command=lambda: self._move(-1), relief="flat", bg=THEME["surface_2"], fg=THEME["text"], activebackground=THEME["accent"], activeforeground="white", width=3).pack(side="left")
+        self.month_label = tk.Label(self.header, font=("Segoe UI", 10, "bold"), bg=THEME["surface_2"], fg=THEME["text"])
         self.month_label.pack(side="left", expand=True)
-        tk.Button(self.header, text=">", command=lambda: self._move(1), relief="flat", bg="#12304a", fg="white", activebackground="#1d4c73", activeforeground="white", width=3).pack(side="right")
-        self.days = tk.Frame(self, bg="#f7fafc", padx=8, pady=8)
+        tk.Button(self.header, text=">", command=lambda: self._move(1), relief="flat", bg=THEME["surface_2"], fg=THEME["text"], activebackground=THEME["accent"], activeforeground="white", width=3).pack(side="right")
+        self.days = tk.Frame(self, bg=THEME["surface"], padx=8, pady=8)
         self.days.pack()
         self._render_month()
 
@@ -123,7 +136,7 @@ class CalendarPopup(tk.Toplevel):
             child.destroy()
         self.month_label.configure(text=f"{calendar.month_name[self.month]} {self.year}")
         for col, name in enumerate(("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")):
-            tk.Label(self.days, text=name, width=4, font=("Segoe UI", 8, "bold"), bg="#f7fafc", fg="#64748b").grid(row=0, column=col, padx=1, pady=(0, 3))
+            tk.Label(self.days, text=name, width=4, font=("Segoe UI", 8, "bold"), bg=THEME["surface"], fg=THEME["muted"]).grid(row=0, column=col, padx=1, pady=(0, 3))
         weeks = calendar.Calendar(firstweekday=6).monthdatescalendar(self.year, self.month)
         for row, week in enumerate(weeks, start=1):
             for col, day in enumerate(week):
@@ -131,8 +144,8 @@ class CalendarPopup(tk.Toplevel):
                 selected = day == self.selected
                 button = tk.Button(
                     self.days, text=str(day.day), width=4, relief="flat", font=("Segoe UI", 9),
-                    bg="#087e6b" if selected else "#f7fafc", fg="white" if selected else ("#17324d" if active else "#b3bdc9"),
-                    activebackground="#c9eee6", command=lambda chosen=day: self._choose(chosen),
+                    bg=THEME["accent_2"] if selected else THEME["surface_2"], fg="white" if selected else (THEME["text"] if active else THEME["muted"]),
+                    activebackground=THEME["accent"], activeforeground="white", command=lambda chosen=day: self._choose(chosen),
                 )
                 button.grid(row=row, column=col, padx=1, pady=1)
 
@@ -533,7 +546,7 @@ class GasTrackerApp(tk.Tk):
         self.title(APP_NAME)
         self.geometry("1180x760")
         self.minsize(900, 610)
-        self.configure(bg="#eef3f8")
+        self.configure(bg=THEME["bg"])
         self._setup_style()
         self._build_ui()
         self.refresh_all()
@@ -541,33 +554,39 @@ class GasTrackerApp(tk.Tk):
     def _setup_style(self) -> None:
         style = ttk.Style(self)
         style.theme_use("clam")
-        style.configure("TFrame", background="#eef3f8")
-        style.configure("TLabel", background="#eef3f8", foreground="#243447", font=("Segoe UI", 10))
-        style.configure("TNotebook", background="#eef3f8", borderwidth=0)
-        style.configure("TNotebook.Tab", padding=(18, 10), background="#dce5f0", foreground="#385069", font=("Segoe UI", 10, "bold"))
-        style.map("TNotebook.Tab", background=[("selected", "#12304a")], foreground=[("selected", "white")])
-        style.configure("Title.TLabel", font=("Segoe UI", 20, "bold"), foreground="#12304a", background="#eef3f8")
-        style.configure("Sub.TLabel", font=("Segoe UI", 10), foreground="#66798e", background="#eef3f8")
-        style.configure("Card.TFrame", background="white", relief="solid", borderwidth=1)
-        style.configure("CardTitle.TLabel", font=("Segoe UI", 10, "bold"), foreground="#66798e", background="white")
-        style.configure("CardValue.TLabel", font=("Segoe UI", 18, "bold"), foreground="#12304a", background="white")
-        style.configure("Primary.TButton", font=("Segoe UI", 10, "bold"), padding=(15, 9), background="#087e6b", foreground="white", borderwidth=0)
-        style.map("Primary.TButton", background=[("active", "#056454")])
-        style.configure("Accent.TButton", font=("Segoe UI", 10, "bold"), padding=(12, 7), background="#12304a", foreground="white", borderwidth=0)
-        style.map("Accent.TButton", background=[("active", "#1d4c73")])
-        style.configure("TLabelFrame", background="white", bordercolor="#d8e1eb", relief="solid")
-        style.configure("TLabelFrame.Label", background="white", foreground="#12304a", font=("Segoe UI", 10, "bold"))
-        style.configure("Treeview", font=("Segoe UI", 10), rowheight=34, background="white", fieldbackground="white", bordercolor="#d8e1eb")
-        style.configure("Treeview.Heading", font=("Segoe UI", 10, "bold"), background="#dce5f0", foreground="#12304a", relief="flat")
+        style.configure("TFrame", background=THEME["bg"])
+        style.configure("TLabel", background=THEME["bg"], foreground=THEME["text"], font=("Segoe UI", 10))
+        style.configure("Panel.TLabel", background=THEME["surface"], foreground=THEME["text"], font=("Segoe UI", 10))
+        style.configure("SubPanel.TLabel", background=THEME["surface"], foreground=THEME["muted"], font=("Segoe UI", 10))
+        style.configure("TNotebook", background=THEME["bg"], borderwidth=0)
+        style.configure("TNotebook.Tab", padding=(18, 10), background=THEME["surface_2"], foreground=THEME["muted"], font=("Segoe UI", 10, "bold"))
+        style.map("TNotebook.Tab", background=[("selected", THEME["surface"])], foreground=[("selected", THEME["text"])])
+        style.configure("Title.TLabel", font=("Segoe UI", 20, "bold"), foreground=THEME["text"], background=THEME["bg"])
+        style.configure("Sub.TLabel", font=("Segoe UI", 10), foreground=THEME["muted"], background=THEME["bg"])
+        style.configure("Card.TFrame", background=THEME["surface"], relief="solid", borderwidth=1, bordercolor=THEME["line"])
+        style.configure("CardTitle.TLabel", font=("Segoe UI", 10, "bold"), foreground=THEME["muted"], background=THEME["surface"])
+        style.configure("CardValue.TLabel", font=("Segoe UI", 18, "bold"), foreground=THEME["text"], background=THEME["surface"])
+        style.configure("Primary.TButton", font=("Segoe UI", 10, "bold"), padding=(15, 9), background=THEME["accent_2"], foreground="white", borderwidth=0)
+        style.map("Primary.TButton", background=[("active", "#1fd0bb")])
+        style.configure("Accent.TButton", font=("Segoe UI", 10, "bold"), padding=(12, 7), background=THEME["accent"], foreground="white", borderwidth=0)
+        style.map("Accent.TButton", background=[("active", "#61adff")])
+        style.configure("TLabelFrame", background=THEME["surface"], bordercolor=THEME["line"], relief="solid")
+        style.configure("TLabelFrame.Label", background=THEME["surface"], foreground=THEME["text"], font=("Segoe UI", 10, "bold"))
+        style.configure("Treeview", font=("Segoe UI", 10), rowheight=34, background=THEME["surface"], fieldbackground=THEME["surface"], foreground=THEME["text"], bordercolor=THEME["line"])
+        style.configure("Treeview.Heading", font=("Segoe UI", 10, "bold"), background=THEME["surface_2"], foreground=THEME["text"], relief="flat")
+        style.map("Treeview", background=[("selected", "#284c75")], foreground=[("selected", "white")])
+        style.configure("TEntry", fieldbackground="#0c1725", foreground=THEME["text"], insertcolor=THEME["text"])
+        style.configure("TCombobox", fieldbackground="#0c1725", foreground=THEME["text"], arrowsize=12)
+        style.map("TCombobox", fieldbackground=[("readonly", "#0c1725")], foreground=[("readonly", THEME["text"])])
 
     def _build_ui(self) -> None:
-        header = tk.Frame(self, bg="#102b43", padx=28, pady=20)
+        header = tk.Frame(self, bg=THEME["surface_2"], padx=28, pady=20)
         header.pack(fill="x")
-        tk.Label(header, text="GAS / SPLIT", font=("Segoe UI", 21, "bold"), fg="white", bg="#102b43").pack(anchor="w")
-        tk.Label(header, text="Track every ride, shared cost, and payment in one clear place.", font=("Segoe UI", 10), fg="#b7cadb", bg="#102b43").pack(anchor="w", pady=(3, 0))
-        controls = tk.Frame(header, bg="#102b43")
+        tk.Label(header, text="GAS / SPLIT", font=("Segoe UI", 21, "bold"), fg=THEME["text"], bg=THEME["surface_2"]).pack(anchor="w")
+        tk.Label(header, text="Track every ride, shared cost, and payment in one clear place.", font=("Segoe UI", 10), fg=THEME["muted"], bg=THEME["surface_2"]).pack(anchor="w", pady=(3, 0))
+        controls = tk.Frame(header, bg=THEME["surface_2"])
         controls.pack(side="right", anchor="n")
-        self.publish_status = tk.Label(controls, text="Publish idle", font=("Segoe UI", 9), fg="#bdd0df", bg="#102b43")
+        self.publish_status = tk.Label(controls, text="Publish idle", font=("Segoe UI", 9), fg=THEME["muted"], bg=THEME["surface_2"])
         self.publish_status.pack(side="right", padx=(0, 8))
         ttk.Button(controls, text="Publish now", style="Accent.TButton", command=self._publish_readonly_snapshot).pack(side="right")
         self.notebook = ttk.Notebook(self)
@@ -607,19 +626,21 @@ class GasTrackerApp(tk.Tk):
         self.balance_card_frame.pack(fill="x", pady=(18, 12))
         lower = ttk.Frame(self.dashboard_tab)
         lower.pack(fill="both", expand=True)
-        left = ttk.LabelFrame(lower, text="Suggested settlements", padding=14)
+        left = tk.Frame(lower, bg=THEME["surface"], highlightbackground=THEME["line"], highlightthickness=1)
         left.pack(side="left", fill="both", expand=True, padx=(0, 9))
-        self.settlement_text = tk.Text(left, height=9, wrap="word", font=("Segoe UI", 11), bg="white", relief="flat", state="disabled")
-        self.settlement_text.pack(fill="both", expand=True)
-        right = ttk.LabelFrame(lower, text="How the balance works", padding=14)
+        ttk.Label(left, text="Suggested settlements", style="CardTitle.TLabel").pack(anchor="w", padx=14, pady=(12, 8))
+        self.settlement_text = tk.Text(left, height=9, wrap="word", font=("Segoe UI", 11), bg=THEME["surface_2"], fg=THEME["text"], insertbackground=THEME["text"], relief="flat", state="disabled", borderwidth=0, highlightthickness=0)
+        self.settlement_text.pack(fill="both", expand=True, padx=14, pady=(0, 14))
+        right = tk.Frame(lower, bg=THEME["surface"], highlightbackground=THEME["line"], highlightthickness=1)
         right.pack(side="left", fill="both", expand=True, padx=(9, 0))
-        ttk.Label(right, justify="left", text=(
+        ttk.Label(right, text="How the balance works", style="CardTitle.TLabel").pack(anchor="w", padx=14, pady=(12, 8))
+        ttk.Label(right, style="Panel.TLabel", justify="left", wraplength=420, text=(
             "Every cost is split only among the selected people.\n\n"
             "The person who paid is credited for the full cost; each participant is charged their share.\n\n"
             "Positive = this person should receive money.\n"
             "Negative = this person owes money.\n\n"
             "A recorded payment moves money between two people and updates the balance instantly."
-        )).pack(anchor="nw")
+        )).pack(anchor="nw", padx=14, pady=(0, 14))
 
     def _build_trip_form(self) -> None:
         ttk.Label(self.trip_tab, text="Log a fuel trip", style="Title.TLabel").grid(row=0, column=0, columnspan=3, sticky="w")
@@ -637,7 +658,7 @@ class GasTrackerApp(tk.Tk):
         self._form_label(form, "Who went?", 5)
         self.trip_people_box = PeopleChecks(form, self.db.people, ["Uday", "Gurpreet"])
         self.trip_people_box.grid(row=5, column=1, sticky="w", pady=(7, 2))
-        self.trip_preview = ttk.Label(form, text="", foreground="#18765a", font=("Segoe UI", 11, "bold"))
+        self.trip_preview = ttk.Label(form, text="", foreground=THEME["success"], font=("Segoe UI", 11, "bold"))
         self.trip_preview.grid(row=6, column=1, sticky="w", pady=(15, 7))
         ttk.Button(form, text="Preview cost", style="Accent.TButton", command=self.preview_trip).grid(row=7, column=1, sticky="w", pady=(3, 5))
         ttk.Button(form, text="Save trip", style="Primary.TButton", command=self.save_trip).grid(row=8, column=1, sticky="w", pady=(8, 0))
@@ -687,7 +708,7 @@ class GasTrackerApp(tk.Tk):
         self.activity_tree.pack(fill="both", expand=True)
         self.activity_tree.bind("<<TreeviewSelect>>", self.show_selected_detail)
         self.activity_tree.bind("<Double-1>", lambda _event: self.edit_selected())
-        self.activity_detail = ttk.Label(self.activity_tab, text="Select an entry to see its calculation or note.", wraplength=1000, foreground="#61708a")
+        self.activity_detail = ttk.Label(self.activity_tab, text="Select an entry to see its calculation or note.", wraplength=1000, foreground=THEME["muted"])
         self.activity_detail.pack(fill="x", pady=(10, 0))
 
     def _build_settings(self) -> None:
@@ -704,7 +725,7 @@ class GasTrackerApp(tk.Tk):
         backups.grid(row=3, column=0, sticky="nw", pady=(20, 0))
         ttk.Button(backups, text="Create database backup", command=self.backup_database).pack(side="left", padx=(0, 9))
         ttk.Button(backups, text="Export ledger to CSV", command=self.export_csv).pack(side="left")
-        ttk.Label(self.settings_tab, text="Tip: keep 407.xlsx as a read-only historical source. This app does not modify it.", foreground="#61708a").grid(row=4, column=0, sticky="w", pady=(15, 0))
+        ttk.Label(self.settings_tab, text="Tip: keep 407.xlsx as a read-only historical source. This app does not modify it.", foreground=THEME["muted"]).grid(row=4, column=0, sticky="w", pady=(15, 0))
 
     def update_choices(self) -> None:
         drivers = list(self.db.drivers)
@@ -841,12 +862,12 @@ class GasTrackerApp(tk.Tk):
         for title, value in summary:
             card = ttk.Frame(self.dashboard_cards, style="Card.TFrame", padding=14); card.pack(side="left", fill="x", expand=True, padx=5)
             ttk.Label(card, text=title, style="CardTitle.TLabel").pack(anchor="w")
-            color = "#087e6b" if value == "Balanced" else "#b7472a" if value == "Review needed" else "#12304a"
+            color = THEME["success"] if value == "Balanced" else THEME["danger"] if value == "Review needed" else THEME["text"]
             ttk.Label(card, text=value, style="CardValue.TLabel", foreground=color).pack(anchor="w", pady=(4, 0))
         for person, balance in balances.items():
             card = ttk.Frame(self.balance_card_frame, style="Card.TFrame", padding=14); card.pack(side="left", fill="x", expand=True, padx=5)
             status = f"should receive {money(balance)}" if balance > 0.005 else f"owes {money(-balance)}" if balance < -0.005 else "settled up"
-            color = "#087e6b" if balance > 0.005 else "#b7472a" if balance < -0.005 else "#66798e"
+            color = THEME["success"] if balance > 0.005 else THEME["danger"] if balance < -0.005 else THEME["muted"]
             ttk.Label(card, text=person, style="CardTitle.TLabel").pack(anchor="w")
             ttk.Label(card, text=status, style="CardValue.TLabel", foreground=color).pack(anchor="w", pady=(4, 0))
         text = "Everyone is settled up."
@@ -877,7 +898,7 @@ class GasTrackerApp(tk.Tk):
             tags = ("pending",) if event["total"] is None else ()
             total = money(event["total"]) if event["total"] is not None else "Price pending"
             self.activity_tree.insert("", "end", iid=iid, values=(event["date"], event["display_type"], event["description"], event["payer"], people, total, share), tags=tags)
-        self.activity_tree.tag_configure("pending", background="#fff4d6", foreground="#8a5a00")
+        self.activity_tree.tag_configure("pending", background="#20190a", foreground=THEME["warning"])
 
     def show_selected_detail(self, _event=None) -> None:
         selected = self.activity_tree.selection()
@@ -939,7 +960,7 @@ class GasTrackerApp(tk.Tk):
         window.title("Fill pending gas prices")
         window.geometry("560x280")
         window.minsize(520, 250)
-        window.configure(bg="#eef3f8")
+        window.configure(bg=THEME["bg"])
         window.transient(self)
         window.grab_set()
 
@@ -1018,10 +1039,10 @@ class GasTrackerApp(tk.Tk):
         window.configure(bg="#eef3f8")
         window.transient(self)
         window.grab_set()
-        header = tk.Frame(window, bg="#102b43", padx=22, pady=15)
+        header = tk.Frame(window, bg=THEME["surface_2"], padx=22, pady=15)
         header.pack(fill="x")
-        tk.Label(header, text=f"Edit {event['display_type']}", font=("Segoe UI", 16, "bold"), fg="white", bg="#102b43").pack(anchor="w")
-        tk.Label(header, text="Save changes to recalculate the dashboard and balances.", font=("Segoe UI", 9), fg="#b7cadb", bg="#102b43").pack(anchor="w", pady=(2, 0))
+        tk.Label(header, text=f"Edit {event['display_type']}", font=("Segoe UI", 16, "bold"), fg=THEME["text"], bg=THEME["surface_2"]).pack(anchor="w")
+        tk.Label(header, text="Save changes to recalculate the dashboard and balances.", font=("Segoe UI", 9), fg=THEME["muted"], bg=THEME["surface_2"]).pack(anchor="w", pady=(2, 0))
         body = ttk.Frame(window, padding=22)
         body.pack(fill="both", expand=True)
         if event["kind"] == "Trip":

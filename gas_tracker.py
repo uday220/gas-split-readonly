@@ -237,6 +237,17 @@ class Database:
                 notes TEXT NOT NULL DEFAULT '',
                 source TEXT NOT NULL DEFAULT ''
             );
+            CREATE TABLE IF NOT EXISTS payment_requests (
+                id INTEGER PRIMARY KEY,
+                request_token TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                event_date TEXT NOT NULL,
+                payer TEXT NOT NULL,
+                payee TEXT NOT NULL,
+                amount REAL NOT NULL CHECK(amount > 0),
+                notes TEXT NOT NULL DEFAULT '',
+                source TEXT NOT NULL DEFAULT ''
+            );
             """
         )
         self.conn.commit()
@@ -384,10 +395,19 @@ class Database:
         self.conn.commit()
         return cursor.rowcount > 0
 
+    def add_payment_request(self, request_token: str, event_date: str, payer: str, payee: str, amount: float, notes: str = "", source: str = "") -> bool:
+        cursor = self.conn.execute(
+            "INSERT OR IGNORE INTO payment_requests(request_token, event_date, payer, payee, amount, notes, source) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (request_token, event_date, payer, payee, round_money(amount), notes.strip(), source.strip()),
+        )
+        self.conn.commit()
+        return cursor.rowcount > 0
+
     def expense_requests(self) -> list[dict]:
         requests: list[dict] = []
         for row in self.conn.execute("SELECT * FROM expense_requests ORDER BY created_at DESC, id DESC"):
             requests.append({
+                "kind": "Expense",
                 "id": row["id"],
                 "request_token": row["request_token"],
                 "created_at": row["created_at"],
@@ -402,10 +422,34 @@ class Database:
             })
         return requests
 
+    def payment_requests(self) -> list[dict]:
+        requests: list[dict] = []
+        for row in self.conn.execute("SELECT * FROM payment_requests ORDER BY created_at DESC, id DESC"):
+            requests.append({
+                "kind": "Payment",
+                "id": row["id"],
+                "request_token": row["request_token"],
+                "created_at": row["created_at"],
+                "event_date": row["event_date"],
+                "payer": row["payer"],
+                "payee": row["payee"],
+                "amount": round_money(row["amount"]),
+                "notes": row["notes"],
+                "source": row["source"],
+            })
+        return requests
+
+    def all_requests(self) -> list[dict]:
+        return sorted(self.expense_requests() + self.payment_requests(), key=lambda row: (row["created_at"], row["kind"], row["id"]), reverse=True)
+
+    def request_count(self) -> int:
+        return sum(self.conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] for table in ("expense_requests", "payment_requests"))
+
     def import_expense_request(self, payload: dict, source: str = "") -> bool:
         token = str(payload.get("request_id") or payload.get("request_token") or "")
         if not token:
             token = json.dumps({
+                "request_kind": "expense",
                 "event_date": payload.get("event_date", ""),
                 "category": payload.get("category", ""),
                 "description": payload.get("description", ""),
@@ -431,6 +475,33 @@ class Database:
             raise ValueError("Request needs a description.")
         return self.add_expense_request(token, event_date, category, description, amount, str(payload["payer"]), attendees, str(payload.get("notes", "")), source)
 
+    def import_payment_request(self, payload: dict, source: str = "") -> bool:
+        token = str(payload.get("request_id") or payload.get("request_token") or "")
+        if not token:
+            token = json.dumps({
+                "request_kind": "payment",
+                "event_date": payload.get("event_date", ""),
+                "payer": payload.get("payer", ""),
+                "payee": payload.get("payee", ""),
+                "amount": payload.get("amount", ""),
+                "notes": payload.get("notes", ""),
+            }, sort_keys=True)
+        amount = float(payload["amount"])
+        if amount <= 0:
+            raise ValueError("Request amount must be greater than zero.")
+        payer = str(payload.get("payer", ""))
+        payee = str(payload.get("payee", ""))
+        if payer not in self.people or payee not in self.people or payer == payee:
+            raise ValueError("Payment requests must use two different saved people.")
+        event_date = parse_date(str(payload["event_date"]))
+        return self.add_payment_request(token, event_date, payer, payee, amount, str(payload.get("notes", "")), source)
+
+    def import_request(self, payload: dict, source: str = "") -> bool:
+        kind = str(payload.get("request_kind") or payload.get("kind") or "expense").strip().lower()
+        if kind == "payment":
+            return self.import_payment_request(payload, source)
+        return self.import_expense_request(payload, source)
+
     def approve_expense_request(self, request_id: int) -> bool:
         row = self.conn.execute("SELECT * FROM expense_requests WHERE id = ?", (request_id,)).fetchone()
         if not row:
@@ -446,6 +517,22 @@ class Database:
 
     def delete_expense_request(self, request_id: int) -> None:
         self.conn.execute("DELETE FROM expense_requests WHERE id = ?", (request_id,))
+        self.conn.commit()
+
+    def approve_payment_request(self, request_id: int) -> bool:
+        row = self.conn.execute("SELECT * FROM payment_requests WHERE id = ?", (request_id,)).fetchone()
+        if not row:
+            return False
+        self.conn.execute(
+            "INSERT INTO payments(event_date, payer, payee, amount, notes) VALUES (?, ?, ?, ?, ?)",
+            (row["event_date"], row["payer"], row["payee"], round_money(row["amount"]), row["notes"]),
+        )
+        self.conn.execute("DELETE FROM payment_requests WHERE id = ?", (request_id,))
+        self.conn.commit()
+        return True
+
+    def delete_payment_request(self, request_id: int) -> None:
+        self.conn.execute("DELETE FROM payment_requests WHERE id = ?", (request_id,))
         self.conn.commit()
 
     def import_original_workbook_once(self, workbook: Path = SOURCE_WORKBOOK) -> tuple[bool, str]:

@@ -2,6 +2,8 @@
 
 This project can generate a static, read-only snapshot for GitHub Pages. The public site has no login, no edit controls, and no database connection. It is a view of the tracker at the moment you generate it.
 
+The public page also includes a request form that downloads a JSON file instead of writing to the database. Import that file in the desktop app under **Expense Requests**, then choose **Add selected** to approve it or **Delete selected** to discard it.
+
 ## Privacy first
 
 The generated `docs/index.html` contains participant names, balances, costs, dates, descriptions, and notes. Anyone with the public website link can read that information. Do not publish it unless everyone is comfortable with that visibility. The local database (`gas_tracker.db`) and original spreadsheet (`407.xlsx`) are excluded by `.gitignore` and must never be uploaded.
@@ -51,6 +53,8 @@ git push
 ```
 
 GitHub Pages republishes when the selected branch/folder changes. GitHub notes that publishing can take up to about ten minutes.
+
+If the publish button seems to stall, the desktop app now shows which stage is running: rendering, backup creation, staging, commit, or push. The public snapshot also no longer embeds a fresh timestamp on every run, so unchanged data should stop producing pointless commits.
 
 ## What this deployment does and does not do
 

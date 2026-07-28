@@ -18,6 +18,8 @@ On first launch, the app imports the 20 spreadsheet rows. It treats the 407 row 
 
 Use **Activity** to inspect any entry. Select it and choose **Edit selected** (or double-click it) to correct the date, payer, people, amount, notes, or a gas price entered later. If you fill up and know one gas price should apply to every trip that is still waiting, use **Fill pending gas prices** in Activity to update them all at once.
 
+Use **Expense Requests** when somebody wants to propose a shared cost from the public page. The read-only site can download a request JSON file, and the desktop app lets you import it, then choose **Add selected** to approve it or **Delete selected** to reject it.
+
 ## Share a read-only web view
 
 Run `py publish_readonly.py` to generate `docs/index.html`, a static page with no editing controls or database access. See [DEPLOY_READONLY_WEB.md](DEPLOY_READONLY_WEB.md) for the GitHub Pages deployment steps and privacy checklist.
@@ -27,3 +29,5 @@ Costs are transparent: the payer receives credit for the full amount, and every 
 Before changing major settings or deleting entries, create a database backup from **Settings & Backup**. The same tab can export a full human-readable ledger to CSV.
 
 Every time the app publishes the read-only web snapshot, it also creates a timestamped backup bundle in `backups/` with the SQLite database plus CSV and XLSX ledger exports.
+
+The published snapshot no longer includes a constantly changing timestamp, so a publish only updates GitHub Pages when the underlying data or page layout actually changed.

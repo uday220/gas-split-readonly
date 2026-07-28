@@ -17,6 +17,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import time
 import threading
 from collections import defaultdict
 from datetime import date, datetime
@@ -38,7 +39,7 @@ DEFAULT_DRIVERS = {"Uday": 8.2, "Gurpreet": 7.9}
 PUBLISH_COMMAND = [sys.executable, str(DATA_DIR / "publish_readonly.py")]
 GIT_PUBLISH_COMMAND = ["git", "add", "docs/index.html", "docs/.nojekyll"]
 GIT_COMMIT_COMMAND = ["git", "commit", "-m", "Update read-only GitHub Pages snapshot"]
-GIT_PUSH_COMMAND = ["git", "push", "origin", "master"]
+GIT_PUSH_COMMAND = ["git", "push", "--quiet", "origin", "master"]
 THEME = {
     "bg": "#07111d",
     "surface": "#0e1a2b",
@@ -223,6 +224,19 @@ class Database:
                 notes TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+            CREATE TABLE IF NOT EXISTS expense_requests (
+                id INTEGER PRIMARY KEY,
+                request_token TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                event_date TEXT NOT NULL,
+                category TEXT NOT NULL,
+                description TEXT NOT NULL,
+                amount REAL NOT NULL CHECK(amount > 0),
+                payer TEXT NOT NULL,
+                attendees TEXT NOT NULL,
+                notes TEXT NOT NULL DEFAULT '',
+                source TEXT NOT NULL DEFAULT ''
+            );
             """
         )
         self.conn.commit()
@@ -360,6 +374,78 @@ class Database:
         if not table:
             raise ValueError("Unknown event type.")
         self.conn.execute(f"DELETE FROM {table} WHERE id = ?", (event_id,))
+        self.conn.commit()
+
+    def add_expense_request(self, request_token: str, event_date: str, category: str, description: str, amount: float, payer: str, attendees: list[str], notes: str = "", source: str = "") -> bool:
+        cursor = self.conn.execute(
+            "INSERT OR IGNORE INTO expense_requests(request_token, event_date, category, description, amount, payer, attendees, notes, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (request_token, event_date, category.strip(), description.strip(), round_money(amount), payer, json.dumps(attendees), notes.strip(), source.strip()),
+        )
+        self.conn.commit()
+        return cursor.rowcount > 0
+
+    def expense_requests(self) -> list[dict]:
+        requests: list[dict] = []
+        for row in self.conn.execute("SELECT * FROM expense_requests ORDER BY created_at DESC, id DESC"):
+            requests.append({
+                "id": row["id"],
+                "request_token": row["request_token"],
+                "created_at": row["created_at"],
+                "event_date": row["event_date"],
+                "category": row["category"],
+                "description": row["description"],
+                "amount": round_money(row["amount"]),
+                "payer": row["payer"],
+                "attendees": json.loads(row["attendees"]),
+                "notes": row["notes"],
+                "source": row["source"],
+            })
+        return requests
+
+    def import_expense_request(self, payload: dict, source: str = "") -> bool:
+        token = str(payload.get("request_id") or payload.get("request_token") or "")
+        if not token:
+            token = json.dumps({
+                "event_date": payload.get("event_date", ""),
+                "category": payload.get("category", ""),
+                "description": payload.get("description", ""),
+                "amount": payload.get("amount", ""),
+                "payer": payload.get("payer", ""),
+                "attendees": payload.get("attendees", []),
+                "notes": payload.get("notes", ""),
+            }, sort_keys=True)
+        attendees = payload.get("attendees")
+        if not isinstance(attendees, list) or not attendees:
+            raise ValueError("Request file must include at least one attendee.")
+        amount = float(payload["amount"])
+        if amount <= 0:
+            raise ValueError("Request amount must be greater than zero.")
+        if payload.get("payer") not in self.people:
+            raise ValueError("Request payer must be one of the saved people.")
+        if any(person not in self.people for person in attendees):
+            raise ValueError("Request attendees must use the saved people names.")
+        event_date = parse_date(str(payload["event_date"]))
+        category = str(payload.get("category", "Other") or "Other")
+        description = str(payload.get("description", "")).strip()
+        if not description:
+            raise ValueError("Request needs a description.")
+        return self.add_expense_request(token, event_date, category, description, amount, str(payload["payer"]), attendees, str(payload.get("notes", "")), source)
+
+    def approve_expense_request(self, request_id: int) -> bool:
+        row = self.conn.execute("SELECT * FROM expense_requests WHERE id = ?", (request_id,)).fetchone()
+        if not row:
+            return False
+        attendees = json.loads(row["attendees"])
+        self.conn.execute(
+            "INSERT INTO expenses(event_date, category, description, amount, payer, attendees, notes) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (row["event_date"], row["category"], row["description"], round_money(row["amount"]), row["payer"], json.dumps(attendees), row["notes"]),
+        )
+        self.conn.execute("DELETE FROM expense_requests WHERE id = ?", (request_id,))
+        self.conn.commit()
+        return True
+
+    def delete_expense_request(self, request_id: int) -> None:
+        self.conn.execute("DELETE FROM expense_requests WHERE id = ?", (request_id,))
         self.conn.commit()
 
     def import_original_workbook_once(self, workbook: Path = SOURCE_WORKBOOK) -> tuple[bool, str]:
@@ -596,18 +682,21 @@ class GasTrackerApp(tk.Tk):
         self.dashboard_tab = ttk.Frame(self.notebook, padding=18)
         self.trip_tab = ttk.Frame(self.notebook, padding=22)
         self.expense_tab = ttk.Frame(self.notebook, padding=22)
+        self.requests_tab = ttk.Frame(self.notebook, padding=22)
         self.payment_tab = ttk.Frame(self.notebook, padding=22)
         self.activity_tab = ttk.Frame(self.notebook, padding=18)
         self.settings_tab = ttk.Frame(self.notebook, padding=22)
         self.notebook.add(self.dashboard_tab, text="Dashboard")
         self.notebook.add(self.trip_tab, text="Add Trip")
         self.notebook.add(self.expense_tab, text="Add Expense")
+        self.notebook.add(self.requests_tab, text="Expense Requests")
         self.notebook.add(self.payment_tab, text="Record Payment")
         self.notebook.add(self.activity_tab, text="Activity")
         self.notebook.add(self.settings_tab, text="Settings & Backup")
         self._build_dashboard()
         self._build_trip_form()
         self._build_expense_form()
+        self._build_requests_tab()
         self._build_payment_form()
         self._build_activity()
         self._build_settings()
@@ -682,6 +771,36 @@ class GasTrackerApp(tk.Tk):
         self.expense_people_box.grid(row=6, column=1, sticky="w", pady=(7, 2))
         ttk.Button(form, text="Save expense", style="Primary.TButton", command=self.save_expense).grid(row=7, column=1, sticky="w", pady=(15, 0))
 
+    def _build_requests_tab(self) -> None:
+        ttk.Label(self.requests_tab, text="Expense Requests", style="Title.TLabel").grid(row=0, column=0, columnspan=3, sticky="w")
+        ttk.Label(self.requests_tab, text="Import request files downloaded from the public page, then add or delete them here without touching the live expense log until you choose to approve one.", style="Sub.TLabel").grid(row=1, column=0, columnspan=3, sticky="w", pady=(3, 15))
+        top = ttk.Frame(self.requests_tab)
+        top.grid(row=2, column=0, sticky="w", pady=(0, 10))
+        ttk.Button(top, text="Import request file", style="Accent.TButton", command=self.import_request_file).pack(side="left")
+        ttk.Button(top, text="Add selected", style="Primary.TButton", command=self.approve_selected_request).pack(side="left", padx=(9, 0))
+        ttk.Button(top, text="Delete selected", command=self.delete_selected_request).pack(side="left", padx=(9, 0))
+        columns = ("created", "date", "category", "description", "amount", "payer", "people")
+        self.requests_tree = ttk.Treeview(self.requests_tab, columns=columns, show="headings", selectmode="browse")
+        headings = {
+            "created": "Imported",
+            "date": "Expense date",
+            "category": "Category",
+            "description": "Description",
+            "amount": "Amount",
+            "payer": "Paid by",
+            "people": "Shared with",
+        }
+        widths = {"created": 115, "date": 95, "category": 95, "description": 245, "amount": 95, "payer": 110, "people": 190}
+        for key in columns:
+            self.requests_tree.heading(key, text=headings[key]); self.requests_tree.column(key, width=widths[key], anchor="w")
+        self.requests_tree.grid(row=3, column=0, columnspan=3, sticky="nsew")
+        self.requests_tree.bind("<<TreeviewSelect>>", self.show_selected_request_detail)
+        self.requests_tree.bind("<Double-1>", lambda _event: self.approve_selected_request())
+        self.requests_detail = ttk.Label(self.requests_tab, text="Import a request file to review it here.", wraplength=1000, foreground="white")
+        self.requests_detail.grid(row=4, column=0, columnspan=3, sticky="w", pady=(10, 0))
+        self.requests_tab.grid_columnconfigure(0, weight=1)
+        self.requests_tab.grid_rowconfigure(3, weight=1)
+
     def _build_payment_form(self) -> None:
         ttk.Label(self.payment_tab, text="Record a payment", style="Title.TLabel").grid(row=0, column=0, columnspan=3, sticky="w")
         ttk.Label(self.payment_tab, text="Enter this only when money actually changed hands. It settles the running balance without changing the original expenses.", style="Sub.TLabel").grid(row=1, column=0, columnspan=3, sticky="w", pady=(3, 15))
@@ -743,6 +862,7 @@ class GasTrackerApp(tk.Tk):
         self.update_choices()
         self.refresh_dashboard()
         self.refresh_activity()
+        self.refresh_requests()
         self.people_setting.delete(0, "end"); self.people_setting.insert(0, ", ".join(self.db.people))
         drivers = self.db.drivers
         self.uday_efficiency.delete(0, "end"); self.uday_efficiency.insert(0, str(drivers.get("Uday", "")))
@@ -795,7 +915,11 @@ class GasTrackerApp(tk.Tk):
         return False
 
     def _git_push_changes(self) -> bool:
-        result = self._subprocess_run(GIT_PUSH_COMMAND)
+        try:
+            result = self._subprocess_run(GIT_PUSH_COMMAND, timeout=90)
+        except subprocess.TimeoutExpired:
+            self._set_publish_status("Git push timed out after 90 seconds", "#f3b000")
+            return False
         if result.returncode == 0:
             return True
         message = (result.stderr or result.stdout or "Unknown error").strip().splitlines()[0]
@@ -819,19 +943,34 @@ class GasTrackerApp(tk.Tk):
             try:
                 while True:
                     self._publish_pending = False
+                    started = time.perf_counter()
                     try:
-                        self._create_backup_bundle()
+                        self._set_publish_status("Rendering read-only snapshot...", "#bdd0df")
                         self._subprocess_run(PUBLISH_COMMAND, check=True)
                     except subprocess.CalledProcessError:
                         self._set_publish_status("Publish failed", "#f97575")
                         break
                     if self._git_has_changes():
-                        if not self._git_stage_changes() or not self._git_commit_changes() or not self._git_push_changes():
+                        render_seconds = time.perf_counter() - started
+                        self._set_publish_status("Creating backup bundle...", "#bdd0df")
+                        self._create_backup_bundle()
+                        self._set_publish_status("Staging snapshot changes...", "#bdd0df")
+                        if not self._git_stage_changes():
                             self._set_publish_status("Publish failed", "#f97575")
                             break
-                        self._set_publish_status(f"Published at {datetime.now().strftime('%H:%M:%S')}", "#a8f0c6")
+                        self._set_publish_status("Committing snapshot...", "#bdd0df")
+                        if not self._git_commit_changes():
+                            self._set_publish_status("Publish failed", "#f97575")
+                            break
+                        self._set_publish_status("Pushing snapshot to GitHub...", "#bdd0df")
+                        if not self._git_push_changes():
+                            self._set_publish_status("Publish failed", "#f97575")
+                            break
+                        total_seconds = time.perf_counter() - started
+                        self._set_publish_status(f"Published in {total_seconds:.1f}s (render {render_seconds:.1f}s)", "#a8f0c6")
                     else:
-                        self._set_publish_status("Snapshot up to date", "#a8f0c6")
+                        total_seconds = time.perf_counter() - started
+                        self._set_publish_status(f"Snapshot up to date in {total_seconds:.1f}s", "#a8f0c6")
                     if not self._publish_pending:
                         break
             finally:
@@ -857,18 +996,19 @@ class GasTrackerApp(tk.Tk):
         for child in self.dashboard_cards.winfo_children(): child.destroy()
         for child in self.balance_card_frame.winfo_children(): child.destroy()
         events = self.db.all_events(); balances, _ = self.db.ledger()
+        requests = len(self.db.expense_requests())
         pending = sum(event["kind"] == "Trip" and event["total"] is None for event in events)
         summary = [
             ("Entries", str(len(events))),
             ("Total shared costs", money(sum(event["total"] or 0 for event in events if event["kind"] != "Payment"))),
             ("Gas prices pending", str(pending)),
+            ("Expense requests", str(requests)),
             ("Ledger check", "Balanced" if abs(sum(balances.values())) < 0.01 else "Review needed"),
         ]
         for title, value in summary:
             card = ttk.Frame(self.dashboard_cards, style="Card.TFrame", padding=14); card.pack(side="left", fill="x", expand=True, padx=5)
             ttk.Label(card, text=title, style="CardTitle.TLabel").pack(anchor="w")
-            color = THEME["success"] if value == "Balanced" else THEME["danger"] if value == "Review needed" else THEME["text"]
-            ttk.Label(card, text=value, style="CardValue.TLabel", foreground=color).pack(anchor="w", pady=(4, 0))
+            ttk.Label(card, text=value, style="CardValue.TLabel").pack(anchor="w", pady=(4, 0))
         for person, balance in balances.items():
             card = ttk.Frame(self.balance_card_frame, style="Card.TFrame", padding=14); card.pack(side="left", fill="x", expand=True, padx=5)
             status = f"should receive {money(balance)}" if balance > 0.005 else f"owes {money(-balance)}" if balance < -0.005 else "settled up"
@@ -904,6 +1044,89 @@ class GasTrackerApp(tk.Tk):
             total = money(event["total"]) if event["total"] is not None else "Price pending"
             self.activity_tree.insert("", "end", iid=iid, values=(event["date"], event["display_type"], event["description"], event["payer"], people, total, share), tags=tags)
         self.activity_tree.tag_configure("pending", background="#20190a", foreground=THEME["warning"])
+
+    def refresh_requests(self) -> None:
+        for item in self.requests_tree.get_children():
+            self.requests_tree.delete(item)
+        self.request_by_iid = {}
+        requests = self.db.expense_requests()
+        for request in requests:
+            iid = f"request:{request['id']}"
+            self.request_by_iid[iid] = request
+            people = ", ".join(request["attendees"])
+            created = request["created_at"].split(" ")[0]
+            self.requests_tree.insert(
+                "",
+                "end",
+                iid=iid,
+                values=(created, request["event_date"], request["category"], request["description"], money(request["amount"]), request["payer"], people),
+            )
+        if not requests:
+            self.requests_detail.configure(text="Import a request file to review it here.")
+            return
+        current = self.requests_tree.selection()
+        if current:
+            self.show_selected_request_detail()
+
+    def show_selected_request_detail(self, _event=None) -> None:
+        selected = self.requests_tree.selection()
+        if not selected:
+            return
+        request = self.request_by_iid[selected[0]]
+        allocations = ", ".join(request["attendees"])
+        note = f" Notes: {request['notes']}" if request["notes"] else ""
+        source = f" Source: {request['source']}." if request["source"] else ""
+        self.requests_detail.configure(
+            text=(
+                f"Request imported on {request['created_at']}. "
+                f"{request['category']}: {request['description']} for {money(request['amount'])}, paid by {request['payer']} and shared with {allocations}."
+                f"{note}{source}"
+            )
+        )
+
+    def import_request_file(self) -> None:
+        path = filedialog.askopenfilename(
+            title="Import expense request",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            with Path(path).open("r", encoding="utf-8") as file:
+                payload = json.load(file)
+            if not isinstance(payload, dict):
+                raise ValueError("Request file must contain one JSON object.")
+            imported = self.db.import_expense_request(payload, source=Path(path).name)
+        except Exception as exc:
+            messagebox.showerror("Request not imported", str(exc))
+            return
+        self.refresh_all()
+        messagebox.showinfo("Request imported", "The request is now waiting in Expense Requests." if imported else "That request was already imported.")
+
+    def approve_selected_request(self) -> None:
+        selected = self.requests_tree.selection()
+        if not selected:
+            messagebox.showinfo("Select a request", "Choose a request to add it to the ledger.")
+            return
+        request = self.request_by_iid[selected[0]]
+        if not messagebox.askyesno("Add request", f"Add {request['description']} to the ledger?"):
+            return
+        self.db.approve_expense_request(request["id"])
+        self.refresh_all()
+        self._publish_readonly_snapshot()
+        self.notebook.select(self.dashboard_tab)
+
+    def delete_selected_request(self) -> None:
+        selected = self.requests_tree.selection()
+        if not selected:
+            messagebox.showinfo("Select a request", "Choose a request to delete it.")
+            return
+        request = self.request_by_iid[selected[0]]
+        if not messagebox.askyesno("Delete request", f"Delete this request for {request['description']}?"):
+            return
+        self.db.delete_expense_request(request["id"])
+        self.refresh_all()
+        self.requests_detail.configure(text="Import a request file to review it here.")
 
     def show_selected_detail(self, _event=None) -> None:
         selected = self.activity_tree.selection()

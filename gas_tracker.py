@@ -36,10 +36,11 @@ SOURCE_WORKBOOK = DATA_DIR / "407.xlsx"
 MONEY = "$"
 DEFAULT_PEOPLE = ["Abdul", "Uday", "Gurpreet"]
 DEFAULT_DRIVERS = {"Uday": 8.2, "Gurpreet": 7.9}
+GIT_CLI = shutil.which("git") or "git"
 PUBLISH_COMMAND = [sys.executable, str(DATA_DIR / "publish_readonly.py")]
-GIT_PUBLISH_COMMAND = ["git", "add", "docs/index.html", "docs/.nojekyll"]
-GIT_COMMIT_COMMAND = ["git", "commit", "-m", "Update read-only GitHub Pages snapshot"]
-GIT_PUSH_COMMAND = ["git", "push", "--quiet", "origin", "master"]
+GIT_PUBLISH_COMMAND = [GIT_CLI, "add", "docs/index.html", "docs/.nojekyll"]
+GIT_COMMIT_COMMAND = [GIT_CLI, "commit", "-m", "Update read-only GitHub Pages snapshot"]
+GIT_PUSH_COMMAND = [GIT_CLI, "push", "--quiet", "origin", "HEAD:master"]
 THEME = {
     "bg": "#07111d",
     "surface": "#0e1a2b",
@@ -963,6 +964,9 @@ class GasTrackerApp(tk.Tk):
         kwargs.setdefault("capture_output", True)
         kwargs.setdefault("text", True)
         kwargs.setdefault("stdin", subprocess.DEVNULL)
+        env = os.environ.copy()
+        env.setdefault("GIT_TERMINAL_PROMPT", "0")
+        kwargs.setdefault("env", env)
         if os.name == "nt":
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
@@ -975,15 +979,27 @@ class GasTrackerApp(tk.Tk):
         return result
 
     def _git_has_remote(self) -> bool:
-        result = self._subprocess_run(["git", "remote"])
+        try:
+            result = self._subprocess_run([GIT_CLI, "remote"])
+        except OSError as exc:
+            self._set_publish_status(f"Git not found: {exc}", "#f97575")
+            return False
         return result.returncode == 0 and bool(result.stdout.strip())
 
     def _git_has_changes(self) -> bool:
-        result = self._subprocess_run(["git", "status", "--porcelain", "--", "docs/index.html", "docs/.nojekyll"])
+        try:
+            result = self._subprocess_run([GIT_CLI, "status", "--porcelain", "--", "docs/index.html", "docs/.nojekyll"])
+        except OSError as exc:
+            self._set_publish_status(f"Git not found: {exc}", "#f97575")
+            return False
         return result.returncode == 0 and bool(result.stdout.strip())
 
     def _git_stage_changes(self) -> bool:
-        result = self._subprocess_run(GIT_PUBLISH_COMMAND)
+        try:
+            result = self._subprocess_run(GIT_PUBLISH_COMMAND)
+        except OSError as exc:
+            self._set_publish_status(f"Git add failed: {exc}", "#f97575")
+            return False
         if result.returncode != 0:
             message = (result.stderr or result.stdout or "Unknown error").strip().splitlines()[0]
             self._set_publish_status(f"Git add failed: {message}", "#f97575")
@@ -991,7 +1007,11 @@ class GasTrackerApp(tk.Tk):
         return True
 
     def _git_commit_changes(self) -> bool:
-        result = self._subprocess_run(GIT_COMMIT_COMMAND)
+        try:
+            result = self._subprocess_run(GIT_COMMIT_COMMAND)
+        except OSError as exc:
+            self._set_publish_status(f"Git commit failed: {exc}", "#f97575")
+            return False
         if result.returncode == 0:
             return True
         output = (result.stderr or result.stdout or "").lower()
@@ -1007,6 +1027,9 @@ class GasTrackerApp(tk.Tk):
         except subprocess.TimeoutExpired:
             self._set_publish_status("Git push timed out after 90 seconds", "#f3b000")
             return False
+        except OSError as exc:
+            self._set_publish_status(f"Git push failed: {exc}", "#f97575")
+            return False
         if result.returncode == 0:
             return True
         message = (result.stderr or result.stdout or "Unknown error").strip().splitlines()[0]
@@ -1018,6 +1041,7 @@ class GasTrackerApp(tk.Tk):
 
     def _publish_readonly_snapshot(self) -> None:
         if not (DATA_DIR / ".git").exists() or not self._git_has_remote():
+            self._set_publish_status("No Git repository or remote configured for publishing", "#f97575")
             return
         self._publish_pending = True
         if self._publishing:
@@ -1034,8 +1058,12 @@ class GasTrackerApp(tk.Tk):
                     try:
                         self._set_publish_status("Rendering read-only snapshot...", "#bdd0df")
                         self._subprocess_run(PUBLISH_COMMAND, check=True)
-                    except subprocess.CalledProcessError:
-                        self._set_publish_status("Publish failed", "#f97575")
+                    except subprocess.CalledProcessError as exc:
+                        message = (exc.stderr or exc.output or str(exc)).strip().splitlines()[0]
+                        self._set_publish_status(f"Render failed: {message}", "#f97575")
+                        break
+                    except OSError as exc:
+                        self._set_publish_status(f"Publish command failed: {exc}", "#f97575")
                         break
                     if self._git_has_changes():
                         render_seconds = time.perf_counter() - started

@@ -748,7 +748,10 @@ class GasTrackerApp(tk.Tk):
         style.configure("TLabelFrame.Label", background=THEME["surface"], foreground="white", font=("Segoe UI", 10, "bold"))
         style.configure("Treeview", font=("Segoe UI", 10), rowheight=34, background=THEME["surface"], fieldbackground=THEME["surface"], foreground="white", bordercolor=THEME["line"])
         style.configure("Treeview.Heading", font=("Segoe UI", 10, "bold"), background=THEME["surface_2"], foreground="white", relief="flat")
+        style.configure("Audit.Treeview", font=("Segoe UI", 10), rowheight=32, background=THEME["surface"], fieldbackground=THEME["surface"], foreground="white", bordercolor=THEME["line"])
+        style.configure("Audit.Treeview.Heading", font=("Segoe UI", 10, "bold"), background=THEME["surface_2"], foreground="white", relief="flat")
         style.map("Treeview", background=[("selected", "#284c75")], foreground=[("selected", "white")])
+        style.map("Audit.Treeview", background=[("selected", "#284c75")], foreground=[("selected", "white")])
         style.configure("TEntry", fieldbackground="#0c1725", foreground="white", insertcolor="white")
         style.configure("TCombobox", fieldbackground="#0c1725", foreground="white", arrowsize=12)
         style.map("TCombobox", fieldbackground=[("readonly", "#0c1725")], foreground=[("readonly", "white")])
@@ -773,6 +776,7 @@ class GasTrackerApp(tk.Tk):
         self.requests_tab = ttk.Frame(self.notebook, padding=22)
         self.payment_tab = ttk.Frame(self.notebook, padding=22)
         self.activity_tab = ttk.Frame(self.notebook, padding=18)
+        self.audit_tab = ttk.Frame(self.notebook, padding=18)
         self.settings_tab = ttk.Frame(self.notebook, padding=22)
         self.notebook.add(self.dashboard_tab, text="Dashboard")
         self.notebook.add(self.trip_tab, text="Add Trip")
@@ -780,6 +784,7 @@ class GasTrackerApp(tk.Tk):
         self.notebook.add(self.requests_tab, text="Expense Requests")
         self.notebook.add(self.payment_tab, text="Record Payment")
         self.notebook.add(self.activity_tab, text="Activity")
+        self.notebook.add(self.audit_tab, text="Owed costs")
         self.notebook.add(self.settings_tab, text="Settings & Backup")
         self._build_dashboard()
         self._build_trip_form()
@@ -787,6 +792,7 @@ class GasTrackerApp(tk.Tk):
         self._build_requests_tab()
         self._build_payment_form()
         self._build_activity()
+        self._build_audit_tab()
         self._build_settings()
 
     @staticmethod
@@ -920,6 +926,42 @@ class GasTrackerApp(tk.Tk):
         self.activity_detail = ttk.Label(self.activity_tab, text="Select an entry to see its calculation or note.", wraplength=1000, foreground="white")
         self.activity_detail.pack(fill="x", pady=(10, 0))
 
+    def _build_audit_tab(self) -> None:
+        top = ttk.Frame(self.audit_tab); top.pack(fill="x", pady=(0, 10))
+        ttk.Label(top, text="Owed costs", style="Title.TLabel").pack(side="left")
+        ttk.Label(top, text="Per person latest owed expenses, up to the amount they currently owe.", style="Sub.TLabel").pack(side="left", padx=14)
+        self.audit_person_area = ttk.Frame(self.audit_tab)
+        self.audit_person_area.pack(fill="both", expand=True, pady=(0, 12))
+        self.audit_person_trees: dict[str, ttk.Treeview] = {}
+        self.audit_person_labels: dict[str, ttk.Label] = {}
+        columns = ("date", "type", "description", "payer", "total", "owes")
+        headings = {
+            "date": "Date",
+            "type": "Type",
+            "description": "What was it",
+            "payer": "Paid by",
+            "total": "Total event",
+            "owes": "Owes",
+        }
+        widths = {"date": 90, "type": 120, "description": 300, "payer": 100, "total": 100, "owes": 100}
+        for idx, person in enumerate(self.db.people):
+            frame = ttk.Frame(self.audit_person_area, style="Card.TFrame")
+            frame.grid(row=0, column=idx, sticky="nsew", padx=(0, 12) if idx < len(self.db.people) - 1 else 0)
+            self.audit_person_area.columnconfigure(idx, weight=1)
+            title = ttk.Label(frame, text=person, style="CardTitle.TLabel")
+            title.pack(anchor="w", pady=(0, 8))
+            label = ttk.Label(frame, text="Loading owed expenses…", style="Sub.TLabel")
+            label.pack(anchor="w", pady=(0, 8))
+            tree = ttk.Treeview(frame, style="Audit.Treeview", columns=columns, show="headings", selectmode="browse", height=6)
+            for key in columns:
+                tree.heading(key, text=headings[key]); tree.column(key, width=widths[key], anchor="w")
+            tree.pack(fill="both", expand=True)
+            tree.bind("<<TreeviewSelect>>", self.show_selected_audit_detail)
+            self.audit_person_trees[person] = tree
+            self.audit_person_labels[person] = label
+        self.audit_detail = ttk.Label(self.audit_tab, text="Select a row to see the owed share detail.", wraplength=1000, foreground="white")
+        self.audit_detail.pack(fill="x", pady=(10, 0))
+
     def _build_settings(self) -> None:
         ttk.Label(self.settings_tab, text="Settings & data safety", style="Title.TLabel").grid(row=0, column=0, columnspan=3, sticky="w")
         ttk.Label(self.settings_tab, text="Set your people and driver fuel efficiencies. The data file stays local to this folder.", style="Sub.TLabel").grid(row=1, column=0, columnspan=3, sticky="w", pady=(3, 15))
@@ -950,6 +992,7 @@ class GasTrackerApp(tk.Tk):
         self.update_choices()
         self.refresh_dashboard()
         self.refresh_activity()
+        self.refresh_audit()
         self.refresh_requests()
         self.people_setting.delete(0, "end"); self.people_setting.insert(0, ", ".join(self.db.people))
         drivers = self.db.drivers
@@ -1159,6 +1202,56 @@ class GasTrackerApp(tk.Tk):
             total = money(event["total"]) if event["total"] is not None else "Price pending"
             self.activity_tree.insert("", "end", iid=iid, values=(event["date"], event["display_type"], event["description"], event["payer"], people, total, share), tags=tags)
         self.activity_tree.tag_configure("pending", background="#20190a", foreground=THEME["warning"])
+
+    def refresh_audit(self) -> None:
+        balances, lines = self.db.ledger()
+        self.audit_by_iid = {}
+        owed_lines = [
+            line for line in lines
+            if line["kind"] != "Payment" and line["amount"] < -0.005 and line["person"] != line["payer"]
+        ]
+        person_to_lines: dict[str, list[dict]] = {person: [] for person in self.db.people}
+        for line in owed_lines:
+            if line["person"] in person_to_lines:
+                person_to_lines[line["person"]].append(line)
+        for person, tree in self.audit_person_trees.items():
+            for item in tree.get_children():
+                tree.delete(item)
+            current_debt = -balances.get(person, 0.0)
+            if current_debt <= 0.005:
+                self.audit_person_labels[person].configure(text="No outstanding owed expenses.")
+                continue
+            owed_lines_for_person = sorted(person_to_lines[person], key=lambda entry: entry["date"], reverse=True)
+            self.audit_person_labels[person].configure(text=f"Showing latest owed expenses up to {money(current_debt)}.")
+            running = 0.0
+            selected_lines: list[dict] = []
+            for line in owed_lines_for_person:
+                if running >= current_debt - 0.005:
+                    break
+                selected_lines.append(line)
+                running += -line["amount"]
+            for idx, line in enumerate(selected_lines):
+                iid = f"audit:{person}:{idx}"
+                self.audit_by_iid[iid] = line
+                amount = money(-line["amount"])
+                total = money(line["total"]) if line["total"] is not None else "Price pending"
+                tree.insert("", "end", iid=iid, values=(line["date"], line["kind"], line["description"], line["payer"], total, amount))
+
+    def show_selected_audit_detail(self, event=None) -> None:
+        widget = event.widget if event else self.audit_tree
+        selected = widget.selection()
+        if not selected:
+            return
+        line = self.audit_by_iid[selected[0]]
+        note = f" Notes: {line['notes']}" if line["notes"] else ""
+        amount = money(-line["amount"])
+        total = money(line["total"]) if line["total"] is not None else "Price pending"
+        self.audit_detail.configure(
+            text=(
+                f"{line['person']} owes {amount} for {line['kind'].lower()} on {line['date']}: {line['description']}. "
+                f"Paid by {line['payer']}. Total event cost: {total}.{note}"
+            )
+        )
 
     def refresh_requests(self) -> None:
         for item in self.requests_tree.get_children():

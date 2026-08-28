@@ -28,7 +28,10 @@ def share_text(event: dict) -> str:
 
 
 def audit_rows(db: Database, person: str) -> str:
-    _, lines = db.ledger()
+    balances, lines = db.ledger()
+    current_debt = -balances.get(person, 0.0)
+    if current_debt <= 0.005:
+        return ""
     owed_lines = [
         line
         for line in lines
@@ -39,8 +42,15 @@ def audit_rows(db: Database, person: str) -> str:
         key=lambda event: (event["date"], event["kind"], event["description"]),
         reverse=True,
     )
-    rows = []
+    selected_lines = []
+    running = 0.0
     for line in sorted_lines:
+        if running >= current_debt - 0.005:
+            break
+        selected_lines.append(line)
+        running += -line["amount"]
+    rows = []
+    for line in selected_lines:
         amount = money(-line["amount"])
         notes = f'<small>{escape(line["notes"])}</small>' if line["notes"] else ""
         total = money(line["total"]) if line["total"] is not None else "Price pending"

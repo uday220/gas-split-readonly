@@ -1256,14 +1256,21 @@ class GasTrackerApp(tk.Tk):
             self.audit_person_empty[person].pack_forget()
             self.audit_person_tables[person].pack(fill="x", expand=True)
             owed_lines_for_person = sorted(person_to_lines[person], key=lambda entry: entry["date"], reverse=True)
-            self.audit_person_labels[person].configure(text=f"Showing all owed expenses totaling {money(current_debt)}.")
-            for idx, line in enumerate(owed_lines_for_person):
+            self.audit_person_labels[person].configure(text=f"Showing latest owed expenses up to {money(current_debt)}.")
+            running = 0.0
+            selected_lines: list[dict] = []
+            for line in owed_lines_for_person:
+                if running >= current_debt - 0.005:
+                    break
+                selected_lines.append(line)
+                running += -line["amount"]
+            for idx, line in enumerate(selected_lines):
                 iid = f"audit:{person}:{idx}"
                 self.audit_by_iid[iid] = line
                 amount = money(-line["amount"])
                 total = money(line["total"]) if line["total"] is not None else "Price pending"
                 tree.insert("", "end", iid=iid, values=(line["date"], line["kind"], line["description"], line["payer"], total, amount))
-            tree.configure(height=max(len(owed_lines_for_person), 1))
+            tree.configure(height=max(len(selected_lines), 1))
 
     def show_selected_audit_detail(self, event=None) -> None:
         widget = event.widget if event else None

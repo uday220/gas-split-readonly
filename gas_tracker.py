@@ -738,6 +738,7 @@ class GasTrackerApp(tk.Tk):
         style.configure("Title.TLabel", font=("Segoe UI", 20, "bold"), foreground="white", background=THEME["bg"])
         style.configure("Sub.TLabel", font=("Segoe UI", 10), foreground="white", background=THEME["bg"])
         style.configure("Card.TFrame", background=THEME["surface"], relief="solid", borderwidth=1, bordercolor=THEME["line"])
+        style.configure("AuditPanel.TFrame", background=THEME["surface"], relief="flat", borderwidth=0)
         style.configure("CardTitle.TLabel", font=("Segoe UI", 10, "bold"), foreground="white", background=THEME["surface"])
         style.configure("CardValue.TLabel", font=("Segoe UI", 18, "bold"), foreground="white", background=THEME["surface"])
         style.configure("Primary.TButton", font=("Segoe UI", 10, "bold"), padding=(15, 9), background=THEME["accent_2"], foreground="white", borderwidth=0)
@@ -750,6 +751,7 @@ class GasTrackerApp(tk.Tk):
         style.configure("Treeview.Heading", font=("Segoe UI", 10, "bold"), background=THEME["surface_2"], foreground="white", relief="flat")
         style.configure("Audit.Treeview", font=("Segoe UI", 10), rowheight=32, background=THEME["surface"], fieldbackground=THEME["surface"], foreground="white", bordercolor=THEME["line"])
         style.configure("Audit.Treeview.Heading", font=("Segoe UI", 10, "bold"), background=THEME["surface_2"], foreground="white", relief="flat")
+        style.configure("AuditEmpty.TLabel", background=THEME["surface_2"], foreground=THEME["muted"], font=("Segoe UI", 10, "bold"), padding=(12, 10))
         style.map("Treeview", background=[("selected", "#284c75")], foreground=[("selected", "white")])
         style.map("Audit.Treeview", background=[("selected", "#284c75")], foreground=[("selected", "white")])
         style.configure("TEntry", fieldbackground="#0c1725", foreground="white", insertcolor="white")
@@ -841,7 +843,7 @@ class GasTrackerApp(tk.Tk):
             self._form_label(form, label, row)
             widget.grid(row=row, column=1, sticky="w", pady=(7, 2))
         self._form_label(form, "Who went?", 5)
-        self.trip_people_box = PeopleChecks(form, self.db.people, ["Uday", "Gurpreet"])
+        self.trip_people_box = PeopleChecks(form, self.db.people, self.db.people)
         self.trip_people_box.grid(row=5, column=1, sticky="w", pady=(7, 2))
         self.trip_preview = ttk.Label(form, text="", foreground="white", font=("Segoe UI", 11, "bold"))
         self.trip_preview.grid(row=6, column=1, sticky="w", pady=(15, 7))
@@ -861,7 +863,7 @@ class GasTrackerApp(tk.Tk):
         for row, (label, widget) in enumerate(fields):
             self._form_label(form, label, row); widget.grid(row=row, column=1, sticky="w", pady=(7, 2))
         self._form_label(form, "Who shares it?", 6)
-        self.expense_people_box = PeopleChecks(form, self.db.people, ["Uday", "Gurpreet"])
+        self.expense_people_box = PeopleChecks(form, self.db.people, self.db.people)
         self.expense_people_box.grid(row=6, column=1, sticky="w", pady=(7, 2))
         ttk.Button(form, text="Save expense", style="Primary.TButton", command=self.save_expense).grid(row=7, column=1, sticky="w", pady=(15, 0))
 
@@ -934,6 +936,9 @@ class GasTrackerApp(tk.Tk):
         self.audit_person_area.pack(fill="both", expand=True, pady=(0, 12))
         self.audit_person_trees: dict[str, ttk.Treeview] = {}
         self.audit_person_labels: dict[str, ttk.Label] = {}
+        self.audit_person_empty: dict[str, ttk.Label] = {}
+        self.audit_person_tables: dict[str, ttk.Frame] = {}
+        self.audit_person_area.columnconfigure(0, weight=1)
         columns = ("date", "type", "description", "payer", "total", "owes")
         headings = {
             "date": "Date",
@@ -945,20 +950,24 @@ class GasTrackerApp(tk.Tk):
         }
         widths = {"date": 90, "type": 120, "description": 300, "payer": 100, "total": 100, "owes": 100}
         for idx, person in enumerate(self.db.people):
-            frame = ttk.Frame(self.audit_person_area, style="Card.TFrame")
-            frame.grid(row=0, column=idx, sticky="nsew", padx=(0, 12) if idx < len(self.db.people) - 1 else 0)
-            self.audit_person_area.columnconfigure(idx, weight=1)
+            frame = ttk.Frame(self.audit_person_area, style="AuditPanel.TFrame", padding=(0, 0, 0, 10))
+            frame.grid(row=idx, column=0, sticky="nsew", pady=(0, 12) if idx < len(self.db.people) - 1 else 0)
             title = ttk.Label(frame, text=person, style="CardTitle.TLabel")
             title.pack(anchor="w", pady=(0, 8))
             label = ttk.Label(frame, text="Loading owed expenses…", style="Sub.TLabel")
             label.pack(anchor="w", pady=(0, 8))
-            tree = ttk.Treeview(frame, style="Audit.Treeview", columns=columns, show="headings", selectmode="browse", height=6)
+            empty = ttk.Label(frame, text="✓  No outstanding expenses", style="AuditEmpty.TLabel")
+            table = ttk.Frame(frame)
+            table.pack(fill="x", expand=True)
+            tree = ttk.Treeview(table, style="Audit.Treeview", columns=columns, show="headings", selectmode="browse", height=6)
             for key in columns:
                 tree.heading(key, text=headings[key]); tree.column(key, width=widths[key], anchor="w")
             tree.pack(fill="both", expand=True)
             tree.bind("<<TreeviewSelect>>", self.show_selected_audit_detail)
             self.audit_person_trees[person] = tree
             self.audit_person_labels[person] = label
+            self.audit_person_empty[person] = empty
+            self.audit_person_tables[person] = table
         self.audit_detail = ttk.Label(self.audit_tab, text="Select a row to see the owed share detail.", wraplength=1000, foreground="white")
         self.audit_detail.pack(fill="x", pady=(10, 0))
 
@@ -988,8 +997,22 @@ class GasTrackerApp(tk.Tk):
             current = combo.get(); combo["values"] = values
             if current not in values: combo.set(values[0] if values else "")
 
+    def refresh_people_boxes(self) -> None:
+        people = self.db.people
+        trip_parent = self.trip_people_box.master
+        expense_parent = self.expense_people_box.master
+        trip_row = self.trip_people_box.grid_info().get("row", 5)
+        expense_row = self.expense_people_box.grid_info().get("row", 6)
+        self.trip_people_box.destroy()
+        self.expense_people_box.destroy()
+        self.trip_people_box = PeopleChecks(trip_parent, people, people)
+        self.trip_people_box.grid(row=trip_row, column=1, sticky="w", pady=(7, 2))
+        self.expense_people_box = PeopleChecks(expense_parent, people, people)
+        self.expense_people_box.grid(row=expense_row, column=1, sticky="w", pady=(7, 2))
+
     def refresh_all(self) -> None:
         self.update_choices()
+        self.refresh_people_boxes()
         self.refresh_dashboard()
         self.refresh_activity()
         self.refresh_audit()
@@ -1144,10 +1167,17 @@ class GasTrackerApp(tk.Tk):
         db_target = base.with_suffix(".db")
         csv_target = base.with_name(base.name + "_ledger.csv")
         xlsx_target = base.with_name(base.name + "_ledger.xlsx")
-        self.db.conn.commit()
-        shutil.copy2(DB_PATH, db_target)
-        self.db.export_csv(csv_target)
-        self.db.export_xlsx(xlsx_target)
+        backup_db = self.db
+        if threading.current_thread() is not threading.main_thread():
+            backup_db = Database(DB_PATH)
+        try:
+            backup_db.conn.commit()
+            shutil.copy2(DB_PATH, db_target)
+            backup_db.export_csv(csv_target)
+            backup_db.export_xlsx(xlsx_target)
+        finally:
+            if backup_db is not self.db:
+                backup_db.conn.close()
         return base
 
     def refresh_dashboard(self) -> None:
@@ -1220,36 +1250,38 @@ class GasTrackerApp(tk.Tk):
             current_debt = -balances.get(person, 0.0)
             if current_debt <= 0.005:
                 self.audit_person_labels[person].configure(text="No outstanding owed expenses.")
+                self.audit_person_tables[person].pack_forget()
+                self.audit_person_empty[person].pack(fill="x", pady=(2, 4))
                 continue
+            self.audit_person_empty[person].pack_forget()
+            self.audit_person_tables[person].pack(fill="x", expand=True)
             owed_lines_for_person = sorted(person_to_lines[person], key=lambda entry: entry["date"], reverse=True)
-            self.audit_person_labels[person].configure(text=f"Showing latest owed expenses up to {money(current_debt)}.")
-            running = 0.0
-            selected_lines: list[dict] = []
-            for line in owed_lines_for_person:
-                if running >= current_debt - 0.005:
-                    break
-                selected_lines.append(line)
-                running += -line["amount"]
-            for idx, line in enumerate(selected_lines):
+            self.audit_person_labels[person].configure(text=f"Showing all owed expenses totaling {money(current_debt)}.")
+            for idx, line in enumerate(owed_lines_for_person):
                 iid = f"audit:{person}:{idx}"
                 self.audit_by_iid[iid] = line
                 amount = money(-line["amount"])
                 total = money(line["total"]) if line["total"] is not None else "Price pending"
                 tree.insert("", "end", iid=iid, values=(line["date"], line["kind"], line["description"], line["payer"], total, amount))
+            tree.configure(height=max(len(owed_lines_for_person), 1))
 
     def show_selected_audit_detail(self, event=None) -> None:
-        widget = event.widget if event else self.audit_tree
+        widget = event.widget if event else None
+        if widget is None:
+            return
         selected = widget.selection()
         if not selected:
             return
-        line = self.audit_by_iid[selected[0]]
-        note = f" Notes: {line['notes']}" if line["notes"] else ""
+        line = self.audit_by_iid.get(selected[0])
+        if not line:
+            return
+        note = f" Notes: {line['notes']}" if line.get("notes") else ""
         amount = money(-line["amount"])
         total = money(line["total"]) if line["total"] is not None else "Price pending"
         self.audit_detail.configure(
             text=(
                 f"{line['person']} owes {amount} for {line['kind'].lower()} on {line['date']}: {line['description']}. "
-                f"Paid by {line['payer']}. Total event cost: {total}.{note}"
+                f"Paid by {line['payer']}. Total cost: {total}.{note}"
             )
         )
 

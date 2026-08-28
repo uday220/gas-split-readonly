@@ -2,7 +2,7 @@
 
 This project can generate a static, read-only snapshot for GitHub Pages. The public site has no login, no edit controls, and no database connection. It is a view of the tracker at the moment you generate it.
 
-The public page also includes a request form that downloads a JSON file instead of writing to the database. Import that file in the desktop app under **Expense Requests**, then choose **Add selected** to approve it or **Delete selected** to discard it.
+The public page ends with the current owed-cost tables for each person. It does not write to the database.
 
 ## Privacy first
 
@@ -19,7 +19,7 @@ GitHub warns that Pages sites are publicly available on the internet, even when 
    py publish_readonly.py
    ```
 
-3. Open `docs/index.html` in a browser to check it. It has only balances and activity; no data can be changed on the page.
+3. Open `docs/index.html` in a browser to check it. It has balances, activity, and stacked owed-cost tables; no data can be changed on the page.
 
 ## Deploy with GitHub Pages
 

@@ -1,11 +1,13 @@
 # Gas & Cost Splitter
 
-Double-click `Launch Gas Tracker.bat` to open the desktop app. It uses only local files:
+Double-click `Launch Gas Tracker.bat` to open the desktop app. By default it uses only local files:
 
 - `gas_tracker.py` — the application
 - `gas_tracker.db` — your live data (created when first opened)
 - `backups/` — copies created with the in-app backup button
 - `407.xlsx` — your original spreadsheet; the app reads it once and never edits it
+
+It can also use one shared hosted database with separate sign-ins on different computers. That is an opt-in setup; follow [SHARED_DATABASE_SETUP.md](SHARED_DATABASE_SETUP.md). Never sync `gas_tracker.db` through a cloud folder to try to share it.
 
 On first launch, the app imports the 20 spreadsheet rows. It treats the 407 row as the `$73.04` toll recorded in the formula, and imports the May 26 Cost Split as an `$88.52` food expense paid by Uday and shared by Uday and Gurpreet.
 
@@ -22,7 +24,7 @@ Use **Expense Requests** when somebody wants to propose a shared cost from the p
 
 ## Share a read-only web view
 
-Run `py publish_readonly.py` to generate `docs/index.html`, a static page with no editing controls or database access. See [DEPLOY_READONLY_WEB.md](DEPLOY_READONLY_WEB.md) for the GitHub Pages deployment steps and privacy checklist.
+Run `python publish_readonly.py` to generate `docs/index.html`, a static page with no editing controls or database access. See [DEPLOY_READONLY_WEB.md](DEPLOY_READONLY_WEB.md) for the GitHub Pages deployment steps and privacy checklist.
 
 Costs are transparent: the payer receives credit for the full amount, and every selected participant pays one equal share. If a split has an unavoidable extra cent, it is charged to a non-payer first, so the person who fronted the money is never short-changed. Each trip stores the fuel efficiency used when it was entered, so changing a car's mileage later does not rewrite history. The dashboard's `Ledger check` should always read `Balanced`.
 

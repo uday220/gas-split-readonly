@@ -2,7 +2,7 @@
 
 This project can generate a static, read-only snapshot for GitHub Pages. The public site has no login, no edit controls, and no database connection. It is a view of the tracker at the moment you generate it.
 
-The public page ends with the current owed-cost tables for each person. It does not write to the database.
+The public page ends with the current owed-cost tables for each person. It does not write to the database. For the optional multi-computer shared-database setup, see [SHARED_DATABASE_SETUP.md](SHARED_DATABASE_SETUP.md).
 
 ## Privacy first
 
@@ -16,7 +16,7 @@ GitHub warns that Pages sites are publicly available on the internet, even when 
 2. In this project folder, run:
 
    ```powershell
-   py publish_readonly.py
+   python publish_readonly.py
    ```
 
 3. Open `docs/index.html` in a browser to check it. It has balances, activity, and stacked owed-cost tables; no data can be changed on the page.
@@ -46,7 +46,7 @@ GitHub Pages can publish plain HTML directly from a repository, and it supports 
 Whenever new entries or payments are added in the desktop app:
 
 ```powershell
-py publish_readonly.py
+python publish_readonly.py
 git add docs/index.html
 git commit -m "Update shared-cost snapshot"
 git push
@@ -60,4 +60,4 @@ If the publish button seems to stall, the desktop app now shows which stage is r
 
 - It does: show a clean, shareable, read-only dashboard in a browser.
 - It does not: sync live automatically, accept edits, expose the SQLite database, or replace local backups.
-- The desktop app remains the only source of truth. Make changes there, make a backup, regenerate `docs/index.html`, then push the static snapshot.
+- In local mode, the desktop app's SQLite database remains the source of truth. In shared mode, the hosted database is the source of truth; the desktop app authenticates to it before rendering the static snapshot. In either mode, make a backup/export, regenerate `docs/index.html`, then push the static snapshot.

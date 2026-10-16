@@ -23,9 +23,10 @@ from collections import defaultdict
 from datetime import date, datetime
 from pathlib import Path
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 
 from openpyxl import Workbook
+from shared_database import SharedDatabase, SharedDatabaseError, config_path as shared_config_path
 
 
 APP_NAME = "Gas & Cost Splitter"
@@ -179,6 +180,8 @@ class DateInput(ttk.Frame):
 
 
 class Database:
+    is_remote = False
+
     def __init__(self, path: Path):
         self.conn = sqlite3.connect(path)
         self.conn.row_factory = sqlite3.Row
@@ -352,6 +355,9 @@ class Database:
         self.conn.execute("UPDATE trips SET price_cents = ? WHERE price_cents IS NULL", (price_cents,))
         self.conn.commit()
         return int(pending)
+
+    def pending_trip_count(self) -> int:
+        return int(self.conn.execute("SELECT COUNT(*) FROM trips WHERE price_cents IS NULL").fetchone()[0])
 
     def add_expense(self, event_date: str, category: str, description: str, amount: float, payer: str, attendees: list[str], notes: str = "") -> None:
         self.conn.execute(
@@ -600,7 +606,7 @@ class Database:
             events.append({
                 "id": row["id"], "kind": "Trip", "display_type": "Fuel trip" if total is not None else "Fuel trip - price pending", "date": row["event_date"], "description": f"{row['kms']:g} km driven by {row['driver']}",
                 "payer": row["driver"], "attendees": attendees, "total": total, "shares": shares, "share": share_values[0] if len(set(share_values)) == 1 else None, "notes": row["notes"],
-                "price_cents": price_cents, "fuel_efficiency": rate, "detail": f"{row['kms']:g} km x {rate:g} L/100 km x {price_cents:g} cents/L" if total is not None else f"{row['kms']:g} km at {rate:g} L/100 km; gas price not entered yet",
+                "price_cents": price_cents, "fuel_efficiency": rate, "kms": row["kms"], "detail": f"{row['kms']:g} km x {rate:g} L/100 km x {price_cents:g} cents/L" if total is not None else f"{row['kms']:g} km at {rate:g} L/100 km; gas price not entered yet",
             })
         for row in self.conn.execute("SELECT * FROM expenses"):
             attendees = json.loads(row["attendees"])
@@ -609,7 +615,7 @@ class Database:
             share_values = list(shares.values())
             events.append({
                 "id": row["id"], "kind": "Expense", "display_type": f"Shared {row['category'].lower()} expense", "category": row["category"], "date": row["event_date"], "description": f"{row['category']}: {row['description']}",
-                "payer": row["payer"], "attendees": attendees, "total": total, "shares": shares, "share": share_values[0] if len(set(share_values)) == 1 else None, "notes": row["notes"], "detail": row["category"],
+                "raw_description": row["description"], "payer": row["payer"], "attendees": attendees, "total": total, "shares": shares, "share": share_values[0] if len(set(share_values)) == 1 else None, "notes": row["notes"], "detail": row["category"],
             })
         for row in self.conn.execute("SELECT * FROM payments"):
             events.append({
@@ -697,6 +703,9 @@ class Database:
         workbook.save(destination)
         return len(lines)
 
+    def close(self) -> None:
+        self.conn.close()
+
 
 class PeopleChecks(ttk.Frame):
     def __init__(self, parent: tk.Misc, people: list[str], selected: list[str] | None = None):
@@ -712,12 +721,12 @@ class PeopleChecks(ttk.Frame):
 
 
 class GasTrackerApp(tk.Tk):
-    def __init__(self, db: Database):
+    def __init__(self, db: Database | SharedDatabase):
         super().__init__()
         self.db = db
         self._publishing = False
         self._publish_pending = False
-        self.title(APP_NAME)
+        self.title(f"{APP_NAME} — {'Shared workspace' if db.is_remote else 'Local database'}")
         self.geometry("1180x760")
         self.minsize(900, 610)
         self.configure(bg=THEME["bg"])
@@ -764,12 +773,15 @@ class GasTrackerApp(tk.Tk):
         header = tk.Frame(self, bg=THEME["surface_2"], padx=28, pady=20)
         header.pack(fill="x")
         tk.Label(header, text="GAS / SPLIT", font=("Segoe UI", 21, "bold"), fg=THEME["text"], bg=THEME["surface_2"]).pack(anchor="w")
-        tk.Label(header, text="Track every ride, shared cost, and payment in one clear place.", font=("Segoe UI", 10), fg=THEME["muted"], bg=THEME["surface_2"]).pack(anchor="w", pady=(3, 0))
+        mode = "Shared workspace — changes are visible to other signed-in members." if self.db.is_remote else "Local database — changes stay on this computer."
+        tk.Label(header, text=mode, font=("Segoe UI", 10), fg=THEME["muted"], bg=THEME["surface_2"]).pack(anchor="w", pady=(3, 0))
         controls = tk.Frame(header, bg=THEME["surface_2"])
         controls.pack(side="right", anchor="n")
         self.publish_status = tk.Label(controls, text="Publish idle", font=("Segoe UI", 9), fg=THEME["muted"], bg=THEME["surface_2"])
         self.publish_status.pack(side="right", padx=(0, 8))
         ttk.Button(controls, text="Publish now", style="Accent.TButton", command=self._publish_readonly_snapshot).pack(side="right")
+        if self.db.is_remote:
+            ttk.Button(controls, text="Refresh shared data", command=self._refresh_shared_data).pack(side="right", padx=(0, 9))
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill="both", expand=True, padx=24, pady=(16, 22))
         self.dashboard_tab = ttk.Frame(self.notebook, padding=18)
@@ -1025,6 +1037,14 @@ class GasTrackerApp(tk.Tk):
     def _run_publish_task(self, task) -> None:
         threading.Thread(target=task, daemon=True).start()
 
+    def _refresh_shared_data(self) -> None:
+        """Re-read the authoritative hosted ledger after another member saves."""
+        try:
+            self.refresh_all()
+            self._set_publish_status("Shared data refreshed", "#a8f0c6")
+        except SharedDatabaseError as exc:
+            self._set_publish_status(f"Refresh failed: {exc}", "#f97575")
+
     def _subprocess_run(self, args, check: bool = False, **kwargs) -> subprocess.CompletedProcess:
         kwargs.setdefault("cwd", DATA_DIR)
         kwargs.setdefault("capture_output", True)
@@ -1123,7 +1143,15 @@ class GasTrackerApp(tk.Tk):
                     started = time.perf_counter()
                     try:
                         self._set_publish_status("Rendering read-only snapshot...", "#bdd0df")
-                        self._subprocess_run(PUBLISH_COMMAND, check=True)
+                        if self.db.is_remote:
+                            # The command-line renderer opens the local SQLite file. In shared
+                            # mode render the already-authenticated hosted data instead.
+                            from publish_readonly import OUTPUT_DIR, page
+                            OUTPUT_DIR.mkdir(exist_ok=True)
+                            (OUTPUT_DIR / "index.html").write_text(page(self.db), encoding="utf-8")
+                            (OUTPUT_DIR / ".nojekyll").write_text("", encoding="utf-8")
+                        else:
+                            self._subprocess_run(PUBLISH_COMMAND, check=True)
                     except subprocess.CalledProcessError as exc:
                         message = (exc.stderr or exc.output or str(exc)).strip().splitlines()[0]
                         self._set_publish_status(f"Render failed: {message}", "#f97575")
@@ -1167,6 +1195,13 @@ class GasTrackerApp(tk.Tk):
         db_target = base.with_suffix(".db")
         csv_target = base.with_name(base.name + "_ledger.csv")
         xlsx_target = base.with_name(base.name + "_ledger.xlsx")
+        if self.db.is_remote:
+            # A hosted database cannot be safely copied as a local SQLite file.
+            # The two exports are portable, human-readable recovery copies.
+            self.db.export_csv(csv_target)
+            self.db.export_xlsx(xlsx_target)
+            return base
+
         backup_db = self.db
         if threading.current_thread() is not threading.main_thread():
             backup_db = Database(DB_PATH)
@@ -1426,7 +1461,7 @@ class GasTrackerApp(tk.Tk):
         self.refresh_all(); self._publish_readonly_snapshot(); self.notebook.select(self.dashboard_tab)
 
     def fill_pending_gas_prices(self) -> None:
-        pending_count = self.db.conn.execute("SELECT COUNT(*) FROM trips WHERE price_cents IS NULL").fetchone()[0]
+        pending_count = self.db.pending_trip_count()
         if not pending_count:
             messagebox.showinfo("No pending prices", "There are no fuel trips waiting for a gas price right now.")
             return
@@ -1647,6 +1682,13 @@ class GasTrackerApp(tk.Tk):
 
     def backup_database(self) -> None:
         base = self._create_backup_bundle()
+        if self.db.is_remote:
+            messagebox.showinfo(
+                "Shared-ledger export created",
+                f"Saved portable exports:\n{base.with_name(base.name + '_ledger.csv')}\n{base.with_name(base.name + '_ledger.xlsx')}\n\n"
+                "The authoritative database remains hosted; no local .db file was copied.",
+            )
+            return
         messagebox.showinfo(
             "Backup created",
             f"Saved:\n{base.with_suffix('.db')}\n{base.with_name(base.name + '_ledger.csv')}\n{base.with_name(base.name + '_ledger.xlsx')}",
@@ -1660,14 +1702,46 @@ class GasTrackerApp(tk.Tk):
         messagebox.showinfo("Ledger exported", f"Exported {count} ledger lines to:\n{target}")
 
 
+def _open_shared_database() -> SharedDatabase | None:
+    """Prompt for an individual Supabase sign-in without saving a password."""
+    prompt = tk.Tk()
+    prompt.withdraw()
+    prompt.attributes("-topmost", True)
+    try:
+        email = simpledialog.askstring(APP_NAME, "Shared workspace email:", parent=prompt)
+        if not email:
+            return None
+        password = simpledialog.askstring(APP_NAME, "Password:", show="*", parent=prompt)
+        if password is None:
+            return None
+        return SharedDatabase.from_config(shared_config_path(DATA_DIR), email, password)
+    except SharedDatabaseError as exc:
+        messagebox.showerror("Shared workspace unavailable", str(exc), parent=prompt)
+        return None
+    finally:
+        prompt.destroy()
+
+
 def main() -> None:
-    db = Database(DB_PATH)
-    imported, message = db.import_original_workbook_once()
+    # A shared_config.json file selects shared mode. Set GAS_TRACKER_MODE=local
+    # only when intentionally opening the retained local fallback database.
+    configured_mode = os.environ.get("GAS_TRACKER_MODE", "").strip().lower()
+    shared_file = shared_config_path(DATA_DIR)
+    if configured_mode not in ("", "local", "shared"):
+        raise SystemExit("GAS_TRACKER_MODE must be local or shared.")
+    if configured_mode == "shared" or (configured_mode != "local" and shared_file.exists()):
+        db = _open_shared_database()
+        if db is None:
+            return
+        imported, message = False, ""
+    else:
+        db = Database(DB_PATH)
+        imported, message = db.import_original_workbook_once()
     app = GasTrackerApp(db)
     if imported:
         app.after(350, lambda: messagebox.showinfo("Spreadsheet imported", message + "\n\nThe original 407.xlsx was not modified."))
     app.mainloop()
-    db.conn.close()
+    db.close()
 
 
 if __name__ == "__main__":

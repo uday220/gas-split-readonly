@@ -211,8 +211,20 @@ class SharedDatabase:
 
     def _rows(self, table: str, order: str = "id.asc") -> list[dict[str, Any]]:
         params = {"workspace_id": f"eq.{self._workspace()}", "select": "*", "order": order}
-        result = self._request("GET", self._table_path(table, params))
-        return list(result) if isinstance(result, list) else []
+        return self._all_rows(table, params)
+
+    def _all_rows(self, table: str, params: dict[str, str]) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        offset = 0
+        while True:
+            page_params = {**params, "limit": "1000", "offset": str(offset)}
+            result = self._request("GET", self._table_path(table, page_params))
+            if not isinstance(result, list):
+                raise SharedDatabaseError(f"Shared database returned an invalid row list for {table}.")
+            rows.extend(result)
+            if not result:
+                return rows
+            offset += len(result)
 
     def _insert(
         self, table: str, values: dict[str, Any], *, on_conflict: str | None = None,
@@ -271,8 +283,7 @@ class SharedDatabase:
         params = {
             "workspace_id": f"eq.{self._workspace()}", "price_cents": "is.null", "select": "id",
         }
-        result = self._request("GET", self._table_path("gas_trips", params))
-        return len(result) if isinstance(result, list) else 0
+        return len(self._all_rows("gas_trips", params))
 
     def add_trip(self, event_date: str, driver: str, kms: float, price_cents: float | None,
                  attendees: list[str], notes: str = "", fuel_efficiency: float | None = None) -> None:

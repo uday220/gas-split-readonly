@@ -1,35 +1,77 @@
 # Gas & Cost Splitter
 
-Double-click `Launch Gas Tracker.bat` to open the desktop app. By default it uses only local files:
+Desktop app for recording shared fuel trips, expenses, and payments. It can keep its ledger in a local SQLite database or connect to one shared Supabase workspace.
 
-- `gas_tracker.py` — the application
-- `gas_tracker.db` — your live data (created when first opened)
-- `backups/` — copies created with the in-app backup button
-- `407.xlsx` — your original spreadsheet; the app reads it once and never edits it
+## Start the app
 
-It can also use one shared hosted database with separate sign-ins on different computers. That is an opt-in setup; follow [SHARED_DATABASE_SETUP.md](SHARED_DATABASE_SETUP.md). Never sync `gas_tracker.db` through a cloud folder to try to share it.
+1. Install **Python 3.10 or later** on Windows and make sure `python` and `pythonw` are available on PATH.
+2. Install the app's Python dependency:
 
-On first launch, the app imports the 20 spreadsheet rows. It treats the 407 row as the `$73.04` toll recorded in the formula, and imports the May 26 Cost Split as an `$88.52` food expense paid by Uday and shared by Uday and Gurpreet.
+   ```powershell
+   python -m pip install openpyxl
+   ```
 
-## Daily use
+3. Double-click `Launch Gas Tracker.bat`.
 
-1. Use **Add Trip** for normal drives. Use the **Pick** button to choose a date from the mini calendar, enter the distance and current price in cents per litre, then select everyone who went. If the price is unknown, leave it empty: the trip is shown as `price pending` and is not included in balances until you add it.
-2. Use **Add Expense** for tolls, food, parking, or any other shared purchase.
-3. Use **Record Payment** only when somebody actually sends money to someone else.
-4. The dashboard says who should receive or pay, and gives the fewest settlement payments needed.
+If the app does not open, run `python gas_tracker.py` from this folder in PowerShell to see startup errors. The launcher uses `pythonw`, which does not open a console window.
 
-Use **Activity** to inspect any entry. Select it and choose **Edit selected** (or double-click it) to correct the date, payer, people, amount, notes, or a gas price entered later. If you fill up and know one gas price should apply to every trip that is still waiting, use **Fill pending gas prices** in Activity to update them all at once.
+## Choose where data is stored
 
-Use **Expense Requests** when somebody wants to propose a shared cost from the public page. The read-only site can download a request JSON file, and the desktop app lets you import it, then choose **Add selected** to approve it or **Delete selected** to reject it.
+### Local mode (default)
 
-## Share a read-only web view
+The app stores the ledger in `gas_tracker.db` beside the application. On first launch, if `407.xlsx` is present, the app imports the supported historical rows once and never edits the workbook. It records that import in the database to avoid importing the same rows again.
 
-Run `python publish_readonly.py` to generate `docs/index.html`, a static page with no editing controls or database access. See [DEPLOY_READONLY_WEB.md](DEPLOY_READONLY_WEB.md) for the GitHub Pages deployment steps and privacy checklist.
+Keep the database and backups private:
 
-Costs are transparent: the payer receives credit for the full amount, and every selected participant pays one equal share. If a split has an unavoidable extra cent, it is charged to a non-payer first, so the person who fronted the money is never short-changed. Each trip stores the fuel efficiency used when it was entered, so changing a car's mileage later does not rewrite history. The dashboard's `Ledger check` should always read `Balanced`.
+- `gas_tracker.db` is the live local ledger.
+- **Settings & Backup → Create database backup** saves a timestamped SQLite backup and CSV/XLSX ledger exports under `backups/`.
+- **Export ledger to CSV** creates a standalone human-readable ledger export.
+- Do not put the live SQLite database in OneDrive, Dropbox, Google Drive, Git, or another synchronized folder to share it. SQLite file syncing is not multiuser database access.
 
-Before changing major settings or deleting entries, create a database backup from **Settings & Backup**. The same tab can export a full human-readable ledger to CSV.
+### Shared Supabase mode (optional)
 
-Every time the app publishes the read-only web snapshot, it also creates a timestamped backup bundle in `backups/` with the SQLite database plus CSV and XLSX ledger exports.
+For multiple computers editing one ledger, configure a shared workspace by following [SHARED_DATABASE_SETUP.md](SHARED_DATABASE_SETUP.md). Once `shared_config.json` is present, the launcher selects shared mode and prompts each user to sign in. The app stores the public project URL/key and workspace ID in that ignored config file; it does not save the user's password.
 
-The published snapshot no longer includes a constantly changing timestamp, so a publish only updates GitHub Pages when the underlying data or page layout actually changed.
+Shared mode requires an internet connection. Use **Refresh shared data** to fetch changes made by another member. The app does not automatically merge data into the local `gas_tracker.db`; that file remains a separate fallback. Set `GAS_TRACKER_MODE=local` for a launch when you intentionally need that fallback.
+
+The shared mode's **Create database backup** action exports CSV and XLSX files; it cannot create a SQLite copy of the hosted database. Keep those exports and any separate Supabase recovery backups.
+
+## Record and review costs
+
+1. **Add Trip** records kilometres, driver, people who went, and the gas price in cents per litre. Leave the price blank if it is unknown; the trip is excluded from balances until priced. **Fill pending gas prices** applies a price to all still-unpriced trips.
+2. **Add Expense** records shared costs such as tolls, food, and parking.
+3. **Record Payment** records money actually sent between two people; it adjusts balances without changing the original expenses.
+4. **Dashboard** shows each person's balance and suggested settlements. **Activity** lets you inspect, edit, or delete saved entries. **Owed costs** shows the active expense shares behind current balances.
+5. The payer is credited for the full cost, and the selected attendees are charged equal shares. If the split leaves an extra cent, it is assigned to a non-payer first. Each trip stores its own fuel-efficiency value, so changing the default later does not rewrite old trips.
+
+Before deleting or making substantial changes, create a backup/export. Deletions cannot be undone except by restoring a backup.
+
+## Expense requests from the public page
+
+The published page includes a **Suggest an expense** form. It only downloads a JSON request file in the visitor's browser; it does not write to the ledger or connect to Supabase. Send that file to a tracker member, who can use **Expense Requests → Import request file** to review it. **Add selected** approves it into the ledger; **Delete selected** rejects it. Duplicate request files are ignored.
+
+## Publish the read-only page
+
+The web page is a **static snapshot**, not a live database viewer. It includes names, balances, dates, descriptions, notes, and expense details; publish it only if everyone is comfortable with that information being public. See [DEPLOY_READONLY_WEB.md](DEPLOY_READONLY_WEB.md) for GitHub Pages setup and privacy guidance.
+
+- In local mode, run `python publish_readonly.py` to render `docs/index.html` from the local database.
+- In shared mode, use **Publish now** in the desktop app so it renders from the signed-in Supabase workspace. Running `publish_readonly.py` directly reads the local SQLite database instead.
+- The app's publish action creates timestamped backup exports when the page changes, then commits and pushes the snapshot to the current branch on `origin`. Git must be installed, a remote must be configured, and the current account must have push access.
+- If two people publish simultaneously, one push can be rejected; sync the current branch and try again.
+
+## Troubleshooting and verification
+
+- Check a local database and the pending shared migration without sending data:
+
+  ```powershell
+  python migrate_to_shared.py --check
+  ```
+
+- Verify shared sign-in and read access:
+
+  ```powershell
+  python shared_setup.py verify
+  ```
+
+- The shared database schema must be installed in Supabase before setup. If the app reports a missing table/function or schema-cache error, verify that [supabase_shared_schema.sql](supabase_shared_schema.sql) was run in the correct project.
+- Keep the local database and the pre-migration recovery backup until the shared workflow has been tested successfully. Follow the migration checks in [SHARED_DATABASE_SETUP.md](SHARED_DATABASE_SETUP.md); do not migrate into a nonempty workspace.

@@ -41,7 +41,7 @@ GIT_CLI = shutil.which("git") or "git"
 PUBLISH_COMMAND = [sys.executable, str(DATA_DIR / "publish_readonly.py")]
 GIT_PUBLISH_COMMAND = [GIT_CLI, "add", "docs/index.html", "docs/.nojekyll"]
 GIT_COMMIT_COMMAND = [GIT_CLI, "commit", "-m", "Update read-only GitHub Pages snapshot"]
-GIT_PUSH_COMMAND = [GIT_CLI, "push", "--quiet", "origin", "HEAD:master"]
+GIT_PUSH_COMMAND = [GIT_CLI, "push", "--quiet", "origin", "HEAD"]
 THEME = {
     "bg": "#07111d",
     "surface": "#0e1a2b",
@@ -951,6 +951,17 @@ class GasTrackerApp(tk.Tk):
         self.audit_person_empty: dict[str, ttk.Label] = {}
         self.audit_person_tables: dict[str, ttk.Frame] = {}
         self.audit_person_area.columnconfigure(0, weight=1)
+        self._rebuild_audit_people()
+        self.audit_detail = ttk.Label(self.audit_tab, text="Select a row to see the owed share detail.", wraplength=1000, foreground="white")
+        self.audit_detail.pack(fill="x", pady=(10, 0))
+
+    def _rebuild_audit_people(self) -> None:
+        for child in self.audit_person_area.winfo_children():
+            child.destroy()
+        self.audit_person_trees = {}
+        self.audit_person_labels = {}
+        self.audit_person_empty = {}
+        self.audit_person_tables = {}
         columns = ("date", "type", "description", "payer", "total", "owes")
         headings = {
             "date": "Date",
@@ -980,12 +991,15 @@ class GasTrackerApp(tk.Tk):
             self.audit_person_labels[person] = label
             self.audit_person_empty[person] = empty
             self.audit_person_tables[person] = table
-        self.audit_detail = ttk.Label(self.audit_tab, text="Select a row to see the owed share detail.", wraplength=1000, foreground="white")
-        self.audit_detail.pack(fill="x", pady=(10, 0))
 
     def _build_settings(self) -> None:
         ttk.Label(self.settings_tab, text="Settings & data safety", style="Title.TLabel").grid(row=0, column=0, columnspan=3, sticky="w")
-        ttk.Label(self.settings_tab, text="Set your people and driver fuel efficiencies. The data file stays local to this folder.", style="Sub.TLabel").grid(row=1, column=0, columnspan=3, sticky="w", pady=(3, 15))
+        storage_note = (
+            "Set your people and driver fuel efficiencies. Shared ledger data is stored in Supabase."
+            if self.db.is_remote
+            else "Set your people and driver fuel efficiencies. The local database stays in this folder."
+        )
+        ttk.Label(self.settings_tab, text=storage_note, style="Sub.TLabel").grid(row=1, column=0, columnspan=3, sticky="w", pady=(3, 15))
         form = ttk.Frame(self.settings_tab); form.grid(row=2, column=0, sticky="nw")
         self.people_setting = self._entry(form, 45)
         self.uday_efficiency = self._entry(form); self.gurpreet_efficiency = self._entry(form)
@@ -1269,6 +1283,8 @@ class GasTrackerApp(tk.Tk):
         self.activity_tree.tag_configure("pending", background="#20190a", foreground=THEME["warning"])
 
     def refresh_audit(self) -> None:
+        if list(self.audit_person_trees) != self.db.people:
+            self._rebuild_audit_people()
         balances, lines = self.db.ledger()
         self.audit_by_iid = {}
         owed_lines = [

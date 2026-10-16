@@ -6,7 +6,6 @@ SQLite database or provides any form to add, edit, or delete data online.
 
 from __future__ import annotations
 
-import json
 from html import escape
 from pathlib import Path
 
@@ -84,35 +83,12 @@ def page(db: Database) -> str:
     pending = sum(event["kind"] == "Trip" and event["total"] is None for event in events)
     total_costs = sum(event["total"] or 0 for event in events if event["kind"] != "Payment")
     people_list = db.people
-    people_json = json.dumps(people_list)
 
     balance_cards = "".join(
         f'<article class="card"><span>{escape(person)}</span><strong class="{"receive" if balance > 0.005 else "owe" if balance < -0.005 else "settled"}">'
         f'{"Should receive " + money(balance) if balance > 0.005 else "Owes " + money(-balance) if balance < -0.005 else "Settled up"}'
         f"</strong></article>"
         for person, balance in balances.items()
-    )
-    owed_lines = [
-        line
-        for line in db.ledger()[1]
-        if line["kind"] != "Payment" and line["amount"] < -0.005 and line["person"] != line["payer"]
-    ]
-    person_owed: dict[str, dict[str, object]] = {}
-    for line in owed_lines:
-        person = line["person"]
-        amount = -line["amount"]
-        existing = person_owed.get(person)
-        if existing is None or line["date"] > existing["latest_date"]:
-            person_owed[person] = {
-                "total": amount if existing is None else existing["total"] + amount,
-                "latest_date": line["date"],
-                "latest_line": line,
-            }
-        else:
-            person_owed[person]["total"] += amount
-    owed_cards = "".join(
-        f'<article class="card"><span>{escape(person)}</span><strong class="owe">Owes {money(data["total"])}</strong><small>Latest owed expense: {escape(data["latest_line"]["date"])} {escape(data["latest_line"]["kind"])} paid by {escape(data["latest_line"]["payer"])}</small></article>'
-        for person, data in sorted(person_owed.items(), key=lambda item: item[0])
     )
     rows = []
     for event in events:
@@ -144,8 +120,52 @@ main {{ max-width:1180px; margin:28px auto 48px; padding:0 24px }} .eyebrow {{ c
 <p class="eyebrow">Snapshot generated from the current database contents. This page cannot modify the tracker.</p>
 <section class="cards"><article class="card"><span>Shared costs tracked</span><strong>{money(total_costs)}</strong></article><article class="card"><span>Entries</span><strong>{len(events)}</strong></article>{balance_cards}</section>
 <section class="panel"><h2>Activity</h2>{pending_note}<div class="table-wrap"><table><thead><tr><th>Date</th><th>What happened</th><th>Details</th><th>Paid by / from</th><th>Shared with</th><th>Total</th><th>Each share</th></tr></thead><tbody>{''.join(rows)}</tbody></table></div></section>
+<section class="panel"><h2>Suggest an expense</h2><p class="hint">This public page does not save to the tracker. Download a request file and send it to a tracker member for review.</p>
+<form id="expense-request-form" class="request-grid">
+<div class="field"><label for="request-date">Date</label><input id="request-date" name="event_date" type="date" required></div>
+<div class="field"><label for="request-category">Category</label><select id="request-category" name="category"><option>Food</option><option>Toll</option><option>Parking</option><option>Other</option></select></div>
+<div class="field"><label for="request-description">Description</label><input id="request-description" name="description" type="text" maxlength="200" required></div>
+<div class="field"><label for="request-amount">Amount ($)</label><input id="request-amount" name="amount" type="number" min="0.01" step="0.01" required></div>
+<div class="field"><label for="request-payer">Paid by</label><select id="request-payer" name="payer" required>{payer_options}</select></div>
+<div class="field full"><span class="people-box"><span class="legend">Shared with</span><span class="checks">{request_people}</span></span></div>
+<div class="field full"><label for="request-notes">Notes (optional)</label><textarea id="request-notes" name="notes" maxlength="1000"></textarea></div>
+<div class="field full"><div class="request-actions"><button type="submit">Download expense request</button></div><p id="request-status" class="hint" aria-live="polite"></p></div>
+</form></section>
 <section class="panel"><h2>Owed costs</h2><p class="hint">Only active owed shares are shown here. Payments and settled transfers are excluded.</p>{audit_tables(db)}</section>
-<footer>Published as a static snapshot. Data changes only when the desktop app is updated and this site is regenerated.</footer></main></body></html>"""
+<footer>Published as a static snapshot. Ledger data changes only when the desktop app is updated and this site is regenerated.</footer></main>
+<script>
+document.getElementById("expense-request-form").addEventListener("submit", function (event) {{
+  event.preventDefault();
+  const form = event.currentTarget;
+  const attendees = Array.from(form.querySelectorAll('input[name="request-attendees"]:checked')).map(function (item) {{ return item.value; }});
+  const status = document.getElementById("request-status");
+  if (!attendees.length) {{
+    status.textContent = "Select at least one person who shares this expense.";
+    return;
+  }}
+  const payload = {{
+    request_kind: "expense",
+    request_id: "expense-" + Date.now() + "-" + Math.random().toString(16).slice(2),
+    event_date: form.elements.namedItem("event_date").value,
+    category: form.elements.namedItem("category").value,
+    description: form.elements.namedItem("description").value.trim(),
+    amount: Number(form.elements.namedItem("amount").value),
+    payer: form.elements.namedItem("payer").value,
+    attendees: attendees,
+    notes: form.elements.namedItem("notes").value.trim()
+  }};
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {{ type: "application/json" }});
+  const link = document.createElement("a");
+  const downloadUrl = URL.createObjectURL(blob);
+  link.href = downloadUrl;
+  link.download = "expense-request-" + payload.event_date + ".json";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(function () {{ URL.revokeObjectURL(downloadUrl); }}, 1000);
+  status.textContent = "Request downloaded. Send the JSON file to a tracker member to import and review.";
+}});
+</script></body></html>"""
 
 
 def main() -> None:

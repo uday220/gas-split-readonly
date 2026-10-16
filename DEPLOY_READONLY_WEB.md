@@ -36,14 +36,14 @@ GitHub warns that Pages sites are publicly available on the internet, even when 
    ```
 
 3. On GitHub, open the repository's **Settings** > **Pages**.
-4. Under **Build and deployment**, choose **Deploy from a branch**, select `main`, then select the `/docs` folder, and save.
+4. Under **Build and deployment**, choose **Deploy from a branch**, select the branch that contains your local snapshot (the example above uses `main`), then select the `/docs` folder, and save. The desktop app pushes to the current local branch, so the Pages source branch must match it.
 5. GitHub will show the published URL in the Pages settings. Share that URL only with people who should see the data.
 
 GitHub Pages can publish plain HTML directly from a repository, and it supports selecting the `/docs` folder on a branch as the publishing source. The page entry point must be named `index.html` at the top of that selected folder. See GitHub's official guidance: [What is GitHub Pages?](https://docs.github.com/en/pages/getting-started-with-github-pages/what-is-github-pages), [configuring a publishing source](https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site), and [404 troubleshooting](https://docs.github.com/en/pages/getting-started-with-github-pages/troubleshooting-404-errors-for-github-pages-sites).
 
 ## Update the published page
 
-Whenever new entries or payments are added in the desktop app:
+In local mode, whenever new entries or payments are added:
 
 ```powershell
 python publish_readonly.py
@@ -53,6 +53,8 @@ git push
 ```
 
 GitHub Pages republishes when the selected branch/folder changes. GitHub notes that publishing can take up to about ten minutes.
+
+In shared mode, publish with **Publish now** in the desktop app. That renders from the signed-in Supabase workspace before pushing to the current branch. Running `python publish_readonly.py` directly always reads the local SQLite database.
 
 If the publish button seems to stall, the desktop app now shows which stage is running: rendering, backup creation, staging, commit, or push. The public snapshot also no longer embeds a fresh timestamp on every run, so unchanged data should stop producing pointless commits.
 

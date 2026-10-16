@@ -75,9 +75,14 @@ def main() -> None:
         remote = SharedDatabase(config, email, password)
         result = remote.import_snapshot(snapshot, marker_for(snapshot))
         remote_balances, _ = remote.ledger()
-        if remote.event_count() != local.event_count() or not balances_match(local.ledger()[0], remote_balances):
+        if (
+            remote.event_count() != local.event_count()
+            or remote.request_count() != local.request_count()
+            or not balances_match(local.ledger()[0], remote_balances)
+        ):
             raise SharedDatabaseError(
-                "The hosted import completed but verification did not match. Stop using shared mode and keep the local backup."
+                "The hosted import completed but entry counts, request counts, or balances did not match. "
+                "Stop using shared mode and keep the local backup."
             )
         print("Migration verified.")
         print("Imported:", result)
